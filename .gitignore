@@ -1,0 +1,23 @@
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+frontend/dist/
+
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+backend/data/
+
+# Local Python envs used only to generate the seminar deck.
+.venv-pptx/
+.venv-seminar/
+__pycache__/
+
+*.log
+.DS_Store
+.codex
+.cursor/
+coverage/
