@@ -245,6 +245,29 @@ export async function searchNgx(q) {
   return data.results || [];
 }
 
+export async function fetchNgxOutlook(symbol, years = 3) {
+  return getJson(
+    `${API_BASE}/ngx/outlook/${encodeURIComponent(symbol)}?years=${encodeURIComponent(years)}`,
+    { ttlMs: 180_000, timeoutMs: 30000 },
+  );
+}
+
+export async function fetchStockOutlook(symbol, years = 3) {
+  return getJson(
+    `${API_BASE}/stocks/${encodeURIComponent(symbol)}/outlook?years=${encodeURIComponent(years)}`,
+    { ttlMs: 180_000, timeoutMs: 25000 },
+  );
+}
+
+export async function fetchCryptoOutlook(id, years = 3, options = {}) {
+  const params = new URLSearchParams({ years: String(years) });
+  if (options.symbol) params.set('symbol', String(options.symbol));
+  return getJson(
+    `${API_BASE}/crypto/${encodeURIComponent(id)}/outlook?${params.toString()}`,
+    { ttlMs: 180_000, timeoutMs: 28000 },
+  );
+}
+
 export async function fetchFx() {
   return getJson(`${API_BASE}/fx/usd-ngn`, { ttlMs: 300_000 });
 }

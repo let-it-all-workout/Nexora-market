@@ -13,6 +13,8 @@ import {
 import { fetchMergedNews } from '../services/news.js';
 import { enrichIndicators } from '../utils/normalize.js';
 import { sessionChange as sessionChangePct, breadthFromChanges, pickNum } from '../utils/marketMath.js';
+import { attachSellFactors } from '../services/ngxSellFactors.js';
+import { parseOutlookYears, projectOutlook } from '../utils/forecast.js';
 
 export const ngxRouter = Router();
 const ROUTE_CACHE = new Map();
@@ -135,8 +137,10 @@ ngxRouter.get('/stocks', async (_req, res) => {
     const cached = getCached('stocks');
     if (cached) return res.json(cached);
     const stocks = await withRateLimitRetry(() => fetchNgxAllStocks());
+    const enriched = await attachSellFactors(stocks);
     const payload = {
-      stocks,
+      stocks: enriched.stocks,
+      sellFactors: enriched.sellFactors,
       provider: 'ngx-pulse',
       metadata: buildMarketMetadata({ provider: 'ngx-pulse', dataKind: 'snapshot' }),
     };
@@ -266,7 +270,9 @@ ngxRouter.get('/company/:symbol', async (req, res) => {
     }
 
     const price = Number(snapshot?.current_price);
-    const pe = Number(snapshot?.pe_ratio);
+    const reportedPe = Number(fundamentalData?.fundamentals?.peRatio);
+    const reportedEps = Number(fundamentalData?.fundamentals?.eps);
+    const pe = Number.isFinite(Number(snapshot?.pe_ratio)) ? Number(snapshot.pe_ratio) : reportedPe;
     const change = dayChangePct(snapshot);
     const dividends = dividendData?.dividends || [];
     const dividendSummary = summariseDividends(dividends, price);
@@ -288,7 +294,8 @@ ngxRouter.get('/company/:symbol', async (req, res) => {
       marketCap: Number.isFinite(Number(snapshot?.market_cap)) ? Number(snapshot.market_cap) : null,
       sharesOutstanding: Number.isFinite(Number(snapshot?.shares_outstanding)) ? Number(snapshot.shares_outstanding) : null,
       peRatio: Number.isFinite(pe) ? pe : null,
-      epsImplied,
+      eps: Number.isFinite(reportedEps) ? reportedEps : null,
+      epsImplied: Number.isFinite(reportedEps) ? null : epsImplied,
       earnings: {
         dividends,
         dividendCount: dividends.length,
@@ -322,6 +329,54 @@ ngxRouter.get('/company/:symbol', async (req, res) => {
       return res.json({ ...stale, stale: true, warning: 'Serving cached NGX company details due to provider limit' });
     }
     return res.status(502).json({ error: error.message, provider: 'ngx-pulse' });
+  }
+});
+
+ngxRouter.get('/outlook/:symbol', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim().toUpperCase();
+  if (!/^[A-Z0-9.-]{1,15}$/.test(symbol)) {
+    return res.status(400).json({ error: 'symbol must be an NGX ticker.', code: 'INVALID_SYMBOL' });
+  }
+  const years = parseOutlookYears(req.query.years ?? 3);
+  if (years == null) {
+    return res.status(400).json({ error: 'years must be 1, 2, 3, or 5.', code: 'INVALID_HORIZON' });
+  }
+
+  const cacheKey = `outlook:${symbol}:${years}`;
+  const cached = getCached(cacheKey);
+  if (cached) return res.json(cached);
+
+  try {
+    const result = await fetchNgxHistory(symbol, { days: 3650 });
+    const series = result.series || [];
+    const projected = projectOutlook(series, {
+      horizonYears: years,
+      periodsPerYear: 252,
+      minBars: 252,
+    });
+    if (!projected.ok || result.metadata?.fallbackReason === 'ngx-pulse-7-day-window') {
+      return res.status(422).json({
+        ...projected,
+        ok: false,
+        error: projected.reason || 'This name does not have a year of daily prices yet.',
+        code: projected.code || 'INSUFFICIENT_HISTORY',
+      });
+    }
+    const body = {
+      ...projected,
+      symbol,
+      currency: 'NGN',
+      provider: 'ngx-pulse',
+      sampleLimited: false,
+    };
+    setCached(cacheKey, body);
+    return res.json(body);
+  } catch (error) {
+    return res.status(502).json({
+      error: `Outlook history is unavailable for ${symbol}.`,
+      code: 'HISTORY_UNAVAILABLE',
+      provider: 'ngx-pulse',
+    });
   }
 });
 

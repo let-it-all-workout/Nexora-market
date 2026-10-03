@@ -3,6 +3,20 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 
 describe('API', () => {
+  it('rejects an invalid NGX outlook horizon before calling a provider', async () => {
+    const app = createApp();
+    const response = await request(app).get('/api/ngx/outlook/DANGCEM?years=4');
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('INVALID_HORIZON');
+  });
+
+  it('rejects an invalid crypto outlook horizon before calling a provider', async () => {
+    const app = createApp();
+    const response = await request(app).get('/api/crypto/bitcoin/outlook?years=4');
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('INVALID_HORIZON');
+  });
+
   it('returns health status', async () => {
     const app = createApp();
     const response = await request(app).get('/api/health');

@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, CartesianGrid, Cell, Legend, Line, LineChart,
   PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { fetchFx, fetchStock, fetchStockInfo, fetchStockNews, fetchStockQuotes, searchStocks } from '../lib/api';
+import { fetchFx, fetchStock, fetchStockInfo, fetchStockNews, fetchStockOutlook, fetchStockQuotes, searchStocks } from '../lib/api';
 import { HelpHint } from '../components/HelpHint';
 import { ConditionBoard } from '../components/ConditionBoard';
 import { MarketChart } from '../components/MarketChart';
+import { OutlookPanel } from '../components/OutlookPanel';
+import { LiquidityFlag } from '../components/LiquidityFlag';
+import { LiquidityBoard } from '../components/LiquidityBoard';
 import { matchesSearch, searchRank } from '../lib/textSearch';
+import { assessLiquidity, scoreLiquidityBoard } from '../lib/liquidity';
 import { useWatchlist } from '../hooks/useWatchlist';
 import { useAuth } from '../lib/auth';
 import { useGuide } from '../lib/guide';
@@ -361,6 +366,9 @@ function stockOverviewPayloadFromSeriesItems(items, snapshotFallback) {
 }
 
 export function StockPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const urlSymbol = useRef(null);
   const { isSignedIn, accountsEnabled, openAuth } = useAuth();
   const { watchlist, toggleWatchlist } = useWatchlist();
   const { active: tourActive, current: tourStep } = useGuide();
@@ -397,7 +405,22 @@ export function StockPage() {
   const searchRef = useRef(null);
   const selectedPanelRef = useRef(null);
   const sectorContextRef = useRef(null);
+  const outlookRef = useRef(null);
+  const compareRef = useRef(null);
   const [sectorContextOn, setSectorContextOn] = useState(false);
+  const [outlookYears, setOutlookYears] = useState(3);
+  const [outlook, setOutlook] = useState(null);
+  const [outlookError, setOutlookError] = useState('');
+  const [outlookLoading, setOutlookLoading] = useState(false);
+  const [showLiquidity, setShowLiquidity] = useState(false);
+  const [fromLiquidity, setFromLiquidity] = useState(false);
+  const [liquidityListKey, setLiquidityListKey] = useState(0);
+  const scrollAfterClose = useRef(null);
+  const liquidityRef = useRef(null);
+  const browseRef = useRef(null);
+  const breadthRef = useRef(null);
+  const vizRef = useRef(null);
+  const conditionRef = useRef(null);
 
   const tf = TIMEFRAMES.find((item) => item.id === timeframe) || TIMEFRAMES[1];
 
@@ -526,6 +549,59 @@ export function StockPage() {
 
   useEffect(() => {
     if (!symbol) {
+      setOutlook(null);
+      setOutlookError('');
+      setOutlookLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setOutlook(null);
+    setOutlookLoading(true);
+    setOutlookError('');
+    fetchStockOutlook(symbol, outlookYears)
+      .then((data) => {
+        if (cancelled) return;
+        setOutlook(data);
+        setOutlookLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setOutlook(null);
+        setOutlookError(err.message || 'Outlook unavailable');
+        setOutlookLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [symbol, outlookYears]);
+
+  useEffect(() => {
+    const incoming = String(searchParams.get('symbol') || '').trim().toUpperCase();
+    if (urlSymbol.current === incoming) return;
+    const previous = urlSymbol.current;
+    urlSymbol.current = incoming;
+    setSymbol(incoming);
+    setSymbolInput(incoming);
+    if (!incoming) {
+      setStockInfo(null);
+      setSearchOpen(false);
+      if (previous && !scrollAfterClose.current) scrollAfterClose.current = browseRef;
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!location.state?.board) return;
+    setShowLiquidity(false);
+    setFromLiquidity(false);
+    setStockFilter('All');
+    setStockCapFilter('all');
+    urlSymbol.current = '';
+    setSymbol('');
+    setSymbolInput('');
+    setStockInfo(null);
+    setSearchOpen(false);
+  }, [location.state]);
+
+  useEffect(() => {
+    if (!symbol) {
       setCompareSymbol('');
       setCompareSeries([]);
       return;
@@ -612,6 +688,17 @@ export function StockPage() {
     selectedPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [symbol, tourActive]);
 
+  useEffect(() => {
+    if (symbol) return undefined;
+    const target = scrollAfterClose.current;
+    if (!target) return undefined;
+    const timer = window.setTimeout(() => {
+      scrollAfterClose.current = null;
+      target.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [symbol, showLiquidity]);
+
   const displaySeries = useMemo(() => {
     if (!showNgn || currency !== 'USD' || !Number.isFinite(fxRate)) return series;
     return scalePriceFields(series, fxRate);
@@ -631,6 +718,54 @@ export function StockPage() {
     [series, compareSeries, symbol, compareSymbol],
   );
   const currentQuote = symbol ? (allQuotes.get(quoteSymbolKey(symbol)) || allQuotes.get(symbol) || null) : null;
+  const marketOpenKnown = useMemo(() => {
+    const state = stockInfo?.marketState || [...allQuotes.values()].find((quote) => quote?.marketState)?.marketState;
+    if (!state) return null;
+    return state === 'REGULAR';
+  }, [allQuotes, stockInfo]);
+  const liquidityBoard = useMemo(() => scoreLiquidityBoard(
+    STOCK_CATALOG.map((entry) => {
+      const quote = allQuotes.get(quoteSymbolKey(entry.symbol)) || allQuotes.get(entry.symbol);
+      return {
+        venue: 'us',
+        symbol: entry.symbol,
+        name: entry.name,
+        sector: entry.sector,
+        volume: quote?.volume,
+        averageVolume: quote?.averageVolume,
+        sharesOutstanding: quote?.sharesOutstanding,
+        price: quote?.price,
+        marketCap: quote?.marketCap,
+      };
+    }),
+    'us',
+    { marketOpen: marketOpenKnown },
+  ), [allQuotes, marketOpenKnown]);
+  const liquidityBySymbol = useMemo(() => {
+    const map = new Map();
+    liquidityBoard.forEach((row) => map.set(row.symbol, row));
+    return map;
+  }, [liquidityBoard]);
+  const liquidityReading = useMemo(() => {
+    if (!symbol) return null;
+    return assessLiquidity({
+      venue: 'us',
+      volume: stockInfo?.volume ?? currentQuote?.volume,
+      averageVolume: stockInfo?.averageVolume ?? currentQuote?.averageVolume,
+      sharesOutstanding: stockInfo?.sharesOutstanding ?? currentQuote?.sharesOutstanding,
+      floatShares: stockInfo?.floatShares,
+      insiderPct: stockInfo?.insiderPct,
+      bid: stockInfo?.bid,
+      ask: stockInfo?.ask,
+      price: stockInfo?.price ?? currentQuote?.price,
+      marketCap: stockInfo?.marketCap ?? currentQuote?.marketCap,
+    }, {
+      venue: 'us',
+      peerTurnovers: liquidityBoard.map((row) => row.turnover),
+      peerCaps: liquidityBoard.map((row) => row.marketCap),
+      marketOpen: marketOpenKnown,
+    });
+  }, [symbol, stockInfo, currentQuote, liquidityBoard, marketOpenKnown]);
   const sectorPeers = useMemo(
     () => STOCK_CATALOG.filter((entry) => entry.sector === selectedStockMeta?.sector && entry.symbol !== symbol),
     [selectedStockMeta, symbol],
@@ -881,11 +1016,95 @@ export function StockPage() {
 
   const showDropdown = searchOpen && symbolInput.trim().length > 0;
 
-  function pickSymbol(s) {
-    setSymbolInput(s);
-    setSymbol(s);
+  function clearSymbolParam() {
+    const params = new URLSearchParams(searchParams);
+    if (!params.get('symbol')) return;
+    params.delete('symbol');
+    setSearchParams(params, { replace: true });
+  }
+
+  function pickSymbol(s, source = '') {
+    const next = String(s || '').trim().toUpperCase();
+    if (!next) return;
+    setFromLiquidity(source === 'liquidity');
+    urlSymbol.current = next;
+    setSymbol(next);
+    setSymbolInput(next);
     setSearchOpen(false);
     setSearchResults([]);
+    const params = new URLSearchParams(searchParams);
+    if (params.get('symbol') === next) return;
+    params.set('symbol', next);
+    setSearchParams(params);
+  }
+
+  function focusSection(ref) {
+    window.requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function chooseTimeframe(id) {
+    setTimeframe(id);
+    focusSection(symbol ? selectedPanelRef : conditionRef);
+  }
+
+  function leaveOpenName(ref) {
+    scrollAfterClose.current = ref;
+    if (!symbol) {
+      focusSection(ref);
+      return;
+    }
+    urlSymbol.current = '';
+    setFromLiquidity(false);
+    setSymbol('');
+    setSymbolInput('');
+    setStockInfo(null);
+    setSearchOpen(false);
+    clearSymbolParam();
+  }
+
+  function chooseBreadth(view) {
+    setBreadthView(view);
+    leaveOpenName(breadthRef);
+  }
+
+  function chooseViz(tab) {
+    setVizTab(tab);
+    leaveOpenName(vizRef);
+  }
+
+  function openLiquidity() {
+    setStockFilter('All');
+    setStockCapFilter('all');
+    setShowLiquidity(true);
+    setLiquidityListKey((key) => key + 1);
+    setFromLiquidity(false);
+    setSearchOpen(false);
+    scrollAfterClose.current = liquidityRef;
+    if (symbol) {
+      urlSymbol.current = '';
+      setSymbol('');
+      setSymbolInput('');
+      setStockInfo(null);
+      clearSymbolParam();
+      return;
+    }
+    window.setTimeout(() => {
+      liquidityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  }
+
+  function closeSymbol() {
+    scrollAfterClose.current = fromLiquidity ? liquidityRef : browseRef;
+    if (fromLiquidity) setShowLiquidity(true);
+    setFromLiquidity(false);
+    urlSymbol.current = '';
+    setSymbol('');
+    setSymbolInput('');
+    setStockInfo(null);
+    setSearchOpen(false);
+    clearSymbolParam();
   }
 
   function handleSearchKey(e) {
@@ -924,6 +1143,13 @@ export function StockPage() {
               label="What does the naira toggle do?"
               text="Shows the same US-dollar prices converted with a live USD to NGN rate. The original data is still in dollars."
             />
+            <button
+              type="button"
+              className={showLiquidity && !symbol ? 'liquidityBtn isActive' : 'liquidityBtn'}
+              onClick={openLiquidity}
+            >
+              Liquidity
+            </button>
           </div>
         </div>
 
@@ -939,7 +1165,7 @@ export function StockPage() {
               aria-label="Search stocks"
             />
             {symbolInput && (
-              <button type="button" className="searchClear" onClick={() => { setSymbolInput(''); setSearchOpen(false); }}>✕</button>
+              <button type="button" className="searchClear" onClick={closeSymbol}>✕</button>
             )}
             {showDropdown && (
               <ul className="suggestionList">
@@ -987,7 +1213,7 @@ export function StockPage() {
 
           <div className="timeframeBar">
             {TIMEFRAMES.map((item) => (
-              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -1053,7 +1279,7 @@ export function StockPage() {
         )}
       </section>
 
-      <section className="panel conditionPanel">
+      <section className="panel conditionPanel" ref={conditionRef}>
         <ConditionBoard
           hint="A sample of four US names: AAPL, MSFT, GOOGL, and NVDA. Bullish means most of those closed higher. It is not the whole market."
           rangeLabel={overview.snapshotFallback ? 'Today’s quotes' : tf.label}
@@ -1102,7 +1328,7 @@ export function StockPage() {
       </section>
 
       {sectorChartData.length > 0 && (
-        <section className="panel">
+        <section className="panel" ref={breadthRef}>
           <div className="sectionHead">
             <h3>Sector Performance & Breadth</h3>
             <span className="tag muted">Daily quote changes</span>
@@ -1135,11 +1361,11 @@ export function StockPage() {
                 </ResponsiveContainer>
               </div>
               <div className="breadthQuickGrid">
-                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => setBreadthView('advancing')}><div className="breadthQuickLabel">Advancing</div><div className="monoNum breadthQuickValue">{breadthData[0].value}</div></button>
-                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => setBreadthView('declining')}><div className="breadthQuickLabel">Declining</div><div className="monoNum breadthQuickValue">{breadthData[1].value}</div></button>
-                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => setBreadthView('unchanged')}><div className="breadthQuickLabel">Unchanged</div><div className="monoNum breadthQuickValue">{breadthData[2].value}</div></button>
+                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => chooseBreadth('advancing')}><div className="breadthQuickLabel">Advancing</div><div className="monoNum breadthQuickValue">{breadthData[0].value}</div></button>
+                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => chooseBreadth('declining')}><div className="breadthQuickLabel">Declining</div><div className="monoNum breadthQuickValue">{breadthData[1].value}</div></button>
+                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => chooseBreadth('unchanged')}><div className="breadthQuickLabel">Unchanged</div><div className="monoNum breadthQuickValue">{breadthData[2].value}</div></button>
               </div>
-              <button type="button" className="breadthShowAll" onClick={() => setBreadthView('all')}>Show all</button>
+              <button type="button" className="breadthShowAll" onClick={() => chooseBreadth('all')}>Show all</button>
             </div>
           </div>
           <div className="ngxTable" style={{ marginTop: '0.8rem', maxHeight: 260, overflowY: 'auto' }}>
@@ -1196,13 +1422,13 @@ export function StockPage() {
       </section>
 
       {allQuotes.size > 0 && (
-        <section className="panel">
+        <section className="panel" ref={vizRef}>
           <div className="sectionHead">
             <h3>Visualizer</h3>
             <div className="timeframeBar">
-              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('performance')}>Performance</button>
-              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('marketcap')}>Market Cap</button>
-              <button type="button" className={vizTab === 'sectors' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('sectors')}>Sectors</button>
+              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('performance')}>Performance</button>
+              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('marketcap')}>Market Cap</button>
+              <button type="button" className={vizTab === 'sectors' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('sectors')}>Sectors</button>
             </div>
           </div>
           {vizTab === 'performance' && (
@@ -1281,7 +1507,9 @@ export function StockPage() {
               <span className={`pctBadge ${change.isPositive ? 'up' : 'down'}`}>
                 {change.isPositive ? '▲' : '▼'} {change.isPositive ? '+' : ''}{change.pct.toFixed(2)}%
               </span>
-              <button type="button" className="expandBtn" onClick={() => { setSymbol(''); setStockInfo(null); }}>← Back</button>
+              <button type="button" className={fromLiquidity ? 'liquidityBack' : 'expandBtn'} onClick={closeSymbol}>
+                {fromLiquidity ? '← Back to liquidity' : '← Back'}
+              </button>
             </div>
           </div>
           <div className="stockHeroSummary">
@@ -1297,6 +1525,9 @@ export function StockPage() {
                 {stockInfo?.exchange && <span className="tag muted">{stockInfo.exchange}</span>}
                 {(stockInfo?.marketCap ?? currentQuote?.marketCap) != null && (
                   <span className="tag muted">{formatUsdCap(stockInfo?.marketCap ?? currentQuote?.marketCap)}</span>
+                )}
+                {liquidityReading?.tone && liquidityReading.tone !== 'unknown' && (
+                  <span className={`tag liquidityTag liquidityTag--${liquidityReading.tone}`}>{liquidityReading.label}</span>
                 )}
               </div>
               <p className="stockHeroSummaryText">
@@ -1332,7 +1563,29 @@ export function StockPage() {
               >
                 See sector context
               </button>
+              <button
+                type="button"
+                className="actionGhost"
+                onClick={() => {
+                  window.requestAnimationFrame(() => {
+                    outlookRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  });
+                }}
+              >
+                Forecast this stock
+              </button>
+              <button
+                type="button"
+                className="liquidityBtn"
+                onClick={openLiquidity}
+              >
+                Liquidity
+              </button>
             </div>
+          </div>
+
+          <div className="tickerOutlook">
+            <LiquidityFlag reading={liquidityReading} name={symbol} />
           </div>
 
           <div className="stockProfile">
@@ -1411,7 +1664,7 @@ export function StockPage() {
           </div>
           <div className="timeframeBar">
             {TIMEFRAMES.map((item) => (
-              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -1432,9 +1685,25 @@ export function StockPage() {
             ))}
           </div>
           <MarketChart title={`Stock: ${symbol}`} data={displaySeries} provenance={meta} isPositive={change.isPositive} currencySymbol={symbolPrefix} changePct={change.pct} />
+          <div className="tickerOutlook" ref={outlookRef}>
+            <OutlookPanel
+              title={`${symbol} over the next ${outlookYears} year${outlookYears === 1 ? '' : 's'}`}
+              hint="Weaker, typical, and stronger are three pictures from this ticker’s own daily prices. The year buttons are how long you might hold it. Forecast in the top menu is the same picture for any name."
+              years={outlookYears}
+              onYears={setOutlookYears}
+              data={outlook ? { ...outlook, fxScale: showNgn && currency === 'USD' && Number.isFinite(fxRate) ? fxRate : 1 } : null}
+              error={outlookError}
+              loading={outlookLoading}
+              formatPrice={(n) => formatMoney(n, unit)}
+            />
+            <p className="subtle outlookPageLink">
+              <Link to={`/forecast?market=stocks&symbol=${encodeURIComponent(symbol)}&years=${outlookYears}`}>Open this range on Forecast</Link>
+              {' '}to pick another name without leaving the forecast tool.
+            </p>
+          </div>
           {error && <p className="warn">{error}</p>}
 
-          <div className="sectionHead" style={{ marginTop: '1rem' }}>
+          <div className="sectionHead" style={{ marginTop: '1rem' }} ref={compareRef}>
             <div>
               <h4>
                 Relative performance{' '}
@@ -1454,7 +1723,7 @@ export function StockPage() {
                   ))}
                 </select>
               </label>
-              <button type="button" className="actionGhost" onClick={() => setCompareSymbol('SPY')}>Use SPY</button>
+              <button type="button" className="actionGhost" onClick={() => { setCompareSymbol('SPY'); focusSection(compareRef); }}>Use SPY</button>
             </div>
           </div>
           <div className="chartWrap" style={{ height: 300 }}>
@@ -1551,8 +1820,21 @@ export function StockPage() {
       </section>
 
 
+      {!symbol && showLiquidity && (
+        <section className="panel" ref={liquidityRef}>
+          <div className="sectionHead">
+            <div>
+              <h3>Liquidity</h3>
+              <p className="subtle">Red means a normal $2,000 sale would be a big part of the day’s trading, nothing traded, or insiders hold about 80% of the shares. Open a row to see it in plain words.</p>
+            </div>
+            <button type="button" className="expandBtn" onClick={() => setShowLiquidity(false)}>Close</button>
+          </div>
+          <LiquidityBoard listKey={liquidityListKey} rows={liquidityBoard} onPick={(row) => pickSymbol(row.symbol, 'liquidity')} />
+        </section>
+      )}
+
       {!symbol && (
-        <section className="panel">
+        <section className="panel" ref={browseRef}>
           <div className="sectionHead">
             <h3>Browse by Sector</h3>
             <span className="tag muted">{STOCK_CATALOG.filter((s) => stockFilter === 'All' || s.sector === stockFilter).length} stocks in view</span>
@@ -1562,34 +1844,34 @@ export function StockPage() {
               <label className="ngxFilterLabel">Sector</label>
               <div className="timeframeBar" style={{ flexWrap: 'wrap' }}>
                 {STOCK_CATEGORIES.map((cat) => (
-                  <button key={cat} type="button" className={stockFilter === cat ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockFilter(cat)}>{cat}</button>
+                  <button key={cat} type="button" className={stockFilter === cat ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockFilter(cat); focusSection(browseRef); }}>{cat}</button>
                 ))}
               </div>
             </div>
             <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Market Cap</label>
               <div className="timeframeBar">
-                <button type="button" className={stockCapFilter === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockCapFilter('all')}>All</button>
-                <button type="button" className={stockCapFilter === 'mega' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockCapFilter('mega')}>Mega ($1T+)</button>
-                <button type="button" className={stockCapFilter === 'large' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockCapFilter('large')}>Large ($100B–1T)</button>
-                <button type="button" className={stockCapFilter === 'mid' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockCapFilter('mid')}>Mid (&lt;$100B)</button>
+                <button type="button" className={stockCapFilter === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockCapFilter('all'); focusSection(browseRef); }}>All</button>
+                <button type="button" className={stockCapFilter === 'mega' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockCapFilter('mega'); focusSection(browseRef); }}>Mega ($1T+)</button>
+                <button type="button" className={stockCapFilter === 'large' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockCapFilter('large'); focusSection(browseRef); }}>Large ($100B–1T)</button>
+                <button type="button" className={stockCapFilter === 'mid' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockCapFilter('mid'); focusSection(browseRef); }}>Mid (&lt;$100B)</button>
               </div>
             </div>
             <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Sort by</label>
               <div className="timeframeBar">
-                <button type="button" className={stockSort === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockSort('market_cap')}>Market Cap</button>
-                <button type="button" className={stockSort === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockSort('price')}>Price</button>
-                <button type="button" className={stockSort === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockSort('change')}>Change</button>
-                <button type="button" className={stockSort === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockSort('volume')}>Volume</button>
-                <button type="button" className={stockSort === 'name' ? 'tfBtn active' : 'tfBtn'} onClick={() => setStockSort('name')}>A–Z</button>
+                <button type="button" className={stockSort === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockSort('market_cap'); focusSection(browseRef); }}>Market Cap</button>
+                <button type="button" className={stockSort === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockSort('price'); focusSection(browseRef); }}>Price</button>
+                <button type="button" className={stockSort === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockSort('change'); focusSection(browseRef); }}>Change</button>
+                <button type="button" className={stockSort === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockSort('volume'); focusSection(browseRef); }}>Volume</button>
+                <button type="button" className={stockSort === 'name' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setStockSort('name'); focusSection(browseRef); }}>A–Z</button>
               </div>
             </div>
           </div>
           <div className="ngxTable">
             <table>
               <thead>
-                <tr><th>Symbol</th><th>Name</th><th>Price</th><th>Change</th><th>Volume</th><th>Market Cap</th><th>Sector</th></tr>
+                <tr><th>Symbol</th><th>Name</th><th>Selling</th><th>Price</th><th>Change</th><th>Volume</th><th>Market Cap</th><th>Sector</th></tr>
               </thead>
               <tbody>
                 {STOCK_CATALOG
@@ -1610,6 +1892,7 @@ export function StockPage() {
                   })
                   .map((s) => {
                     const up = (s.chg ?? 0) >= 0;
+                    const reading = liquidityBySymbol.get(s.symbol);
                     return (
                       <tr
                         key={s.symbol}
@@ -1622,6 +1905,11 @@ export function StockPage() {
                       >
                         <td className="monoNum" style={{ fontWeight: 700 }}>{s.symbol}</td>
                         <td>{s.name}</td>
+                        <td>
+                          {reading?.tone && reading.tone !== 'unknown' ? (
+                            <span className={`tag liquidityTag liquidityTag--${reading.tone}`}>{reading.label}</span>
+                          ) : '—'}
+                        </td>
                         <td className="monoNum">{s.price != null ? formatMoney(s.price, 'USD') : '—'}</td>
                         <td>{s.chg != null ? <span className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {up ? '+' : ''}{s.chg.toFixed(2)}%</span> : <span className="monoNum" style={{ color: '#8a9bb5' }}>—</span>}</td>
                         <td className="monoNum">{s.volume != null ? Number(s.volume).toLocaleString() : '—'}</td>
@@ -1639,7 +1927,7 @@ export function StockPage() {
       {!symbol && (
         <section className="panel emptyState">
           <h3>Select a stock to visualize</h3>
-          <p>Search a ticker, click a mover, or pick from the table. You will get a price chart, optional indicators, a comparison line, and unusual-day flags — not a forecast.</p>
+          <p>Search a ticker, click a mover, or pick from the table. You will get a price chart, optional indicators, a comparison line, unusual-day flags, and this ticker’s possible-performance range. Forecast is also its own button in the top menu.</p>
         </section>
       )}
     </main>

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { buildDataProvenance, fetchStockSeriesWithFallback } from '../services/marketData.js';
 import { fetchMergedNews } from '../services/news.js';
 import { enrichIndicators, normalizeStockSeries } from '../utils/normalize.js';
+import { parseOutlookYears, projectOutlook } from '../utils/forecast.js';
 
 export const stockRouter = Router();
 
@@ -39,6 +40,9 @@ function mapQuote(q) {
     prevClose: q.regularMarketPreviousClose ?? null,
     marketCap: q.marketCap ?? null,
     volume: q.regularMarketVolume ?? null,
+    averageVolume: q.averageDailyVolume3Month ?? q.averageDailyVolume10Day ?? null,
+    sharesOutstanding: q.sharesOutstanding ?? null,
+    marketState: q.marketState || null,
   };
 }
 
@@ -159,14 +163,14 @@ stockRouter.get('/info/:symbol', async (req, res) => {
   try {
     const { symbol } = req.params;
     const ticker = String(symbol || '').trim().toUpperCase();
-    const cacheKey = `info:v3:${ticker}`;
+    const cacheKey = `info:v4:${ticker}`;
     const hit = INFO_CACHE.get(cacheKey);
     if (hit && Date.now() - hit.ts < INFO_TTL) return res.json(hit.value);
 
     const yf = await getYf();
     const [summary, quote, news] = await Promise.all([
       yf.quoteSummary(ticker, {
-        modules: ['price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'summaryProfile', 'assetProfile'],
+        modules: ['price', 'summaryDetail', 'financialData', 'defaultKeyStatistics', 'summaryProfile', 'assetProfile', 'majorHoldersBreakdown'],
       }).catch(() => null),
       yf.quote(ticker).catch(() => null),
       yahooStockNewsMapped(ticker).catch(() => []),
@@ -177,6 +181,7 @@ stockRouter.get('/info/:symbol', async (req, res) => {
     const s = summary?.summaryDetail || {};
     const f = summary?.financialData || {};
     const k = summary?.defaultKeyStatistics || {};
+    const h = summary?.majorHoldersBreakdown || {};
     const a = summary?.assetProfile || summary?.summaryProfile || {};
 
     const result = {
@@ -198,10 +203,15 @@ stockRouter.get('/info/:symbol', async (req, res) => {
       dayLow: pickNum(p.regularMarketDayLow, q.regularMarketDayLow),
       volume: pickNum(p.regularMarketVolume, q.regularMarketVolume, s.volume),
       averageVolume: pickNum(s.averageVolume, q.averageDailyVolume3Month),
+      bid: pickNum(q.bid, s.bid),
+      ask: pickNum(q.ask, s.ask),
+      marketState: pickText(q.marketState),
       marketCap: pickNum(p.marketCap, q.marketCap, s.marketCap),
       enterpriseValue: pickNum(k.enterpriseValue),
       sharesOutstanding: pickNum(k.sharesOutstanding, q.sharesOutstanding),
       floatShares: pickNum(k.floatShares),
+      insiderPct: pickNum(k.heldPercentInsiders, h.insidersPercentHeld),
+      institutionPct: pickNum(k.heldPercentInstitutions, h.institutionsPercentHeld),
       pe: pickNum(s.trailingPE, q.trailingPE, k.trailingPE),
       forwardPe: pickNum(s.forwardPE, k.forwardPE),
       eps: pickNum(k.trailingEps, q.epsTrailingTwelveMonths),
@@ -260,6 +270,53 @@ stockRouter.get('/news/:symbol', async (req, res) => {
     res.json({ symbol, news });
   } catch {
     res.json({ symbol: req.params.symbol, news: [] });
+  }
+});
+
+stockRouter.get('/:symbol/outlook', async (req, res) => {
+  const symbol = String(req.params.symbol || '').trim().toUpperCase();
+  if (!/^[A-Z0-9.-]{1,15}$/.test(symbol)) {
+    return res.status(400).json({ error: 'symbol must be a ticker.', code: 'INVALID_SYMBOL' });
+  }
+  const years = parseOutlookYears(req.query.years ?? 3);
+  if (years == null) {
+    return res.status(400).json({ error: 'years must be 1, 2, 3, or 5.', code: 'INVALID_HORIZON' });
+  }
+
+  const cacheKey = `outlook:${symbol}:${years}`;
+  const cached = RESP_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.ts < RESP_TTL) {
+    return res.json(cached.body);
+  }
+
+  try {
+    const { raw, metadata } = await fetchStockSeriesWithFallback(symbol, '10y', '1d');
+    const { series, currency } = normalizeStockSeries(raw, symbol);
+    const projected = projectOutlook(series, {
+      horizonYears: years,
+      periodsPerYear: 252,
+      minBars: 252,
+    });
+    if (!projected.ok) {
+      const status = projected.code === 'INSUFFICIENT_HISTORY' ? 422 : 400;
+      return res.status(status).json({ ...projected, error: projected.reason });
+    }
+    const body = {
+      ...projected,
+      symbol,
+      currency: currency || 'USD',
+      provider: metadata?.provider || 'yahoo-finance',
+      sampleLimited: false,
+    };
+    RESP_CACHE.set(cacheKey, { body, ts: Date.now() });
+    return res.json(body);
+  } catch (error) {
+    const status = error?.response?.status === 429 ? 429 : 502;
+    return res.status(status).json({
+      error: `Outlook history is unavailable for ${symbol}.`,
+      code: 'HISTORY_UNAVAILABLE',
+      provider: 'yahoo-finance',
+    });
   }
 });
 

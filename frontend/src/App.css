@@ -35,71 +35,224 @@ body {
   background: linear-gradient(180deg, #f3f6fb 0%, #eaf0f8 100%);
 }
 
-/* ── Splash screen ── */
-.splash {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, #0a1628 0%, #0f2340 50%, #162d50 100%);
-  transition: opacity 500ms ease;
+/* ── Opening welcome ── */
+html.intro-open,
+html.intro-open body {
+  overflow: hidden;
 }
 
-.splash.ready { opacity: 0; pointer-events: none; }
+.welcomeIntro {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(1200px 700px at 50% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+    linear-gradient(160deg, #07111f 0%, #0c1c33 48%, #102544 100%);
+  color: #e8f1ff;
+  overflow: hidden;
+}
 
-.splashInner {
+.welcomeIntro.isLeaving {
+  animation: welcomeIntroFade 620ms ease forwards;
+  pointer-events: none;
+}
+
+.welcomeIntroGlow {
+  position: absolute;
+  inset: 18% 12% auto;
+  height: 42%;
+  background: radial-gradient(closest-side, rgba(37, 99, 235, 0.28), transparent 72%);
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.welcomeIntroOrb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(2px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.welcomeIntroOrb--one {
+  width: 220px;
+  height: 220px;
+  left: -40px;
+  bottom: 8%;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.35), transparent 68%);
+  animation: welcomeIntroDrift 7s ease-in-out infinite alternate;
+}
+
+.welcomeIntroOrb--two {
+  width: 160px;
+  height: 160px;
+  right: 6%;
+  top: 12%;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.32), transparent 68%);
+  animation: welcomeIntroDrift 9s ease-in-out infinite alternate-reverse;
+}
+
+.welcomeIntroInner {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.2rem;
-  animation: splashIn 600ms ease-out;
+  text-align: center;
+  gap: 0.55rem;
+  padding: 1.5rem;
 }
 
-.splashLogo {
-  animation: splashFloat 2s ease-in-out infinite;
+.welcomeIntroMark {
+  animation: welcomeIntroRise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.splashLogo .logoMark { margin-bottom: 0; }
-.splashLogo .logoTitle { color: #e0ecff; }
-.splashLogo .logoSub { color: #6b8fc0; }
-.splashLogo svg rect { fill: #0c1e38; stroke: #2563eb; }
-
-.splashPulse {
-  width: 48px;
-  height: 4px;
-  border-radius: 4px;
-  background: #2563eb;
-  animation: splashPulseAnim 1.2s ease-in-out infinite;
+.welcomeIntroMark .logoMark {
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-bottom: 0.2rem;
 }
 
-.splashText {
+.welcomeIntroMark .logoMark svg {
+  width: 72px;
+  height: 72px;
+}
+
+.welcomeIntroMark .logoTitle,
+.welcomeIntroMark .logoSub {
+  display: none;
+}
+
+.welcomeIntroEyebrow {
+  margin: 0.85rem 0 0;
+  color: #7fb4ea;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  animation: welcomeIntroRise 700ms 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.welcomeIntroTitle {
   margin: 0;
-  color: #6b8fc0;
-  font-size: 0.82rem;
-  letter-spacing: 0.04em;
-  animation: splashBlink 1.5s ease-in-out infinite;
+  font-size: clamp(2.1rem, 6vw, 3.6rem);
+  font-weight: 760;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  color: #f7fbff;
+  animation: welcomeIntroRise 800ms 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@keyframes splashIn {
-  from { opacity: 0; transform: scale(0.9) translateY(20px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+.welcomeIntroCopy {
+  margin: 0;
+  color: #9cb6d4;
+  font-size: 1rem;
+  animation: welcomeIntroRise 800ms 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@keyframes splashFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+.welcomeIntroSpark {
+  width: min(240px, 64vw);
+  height: 48px;
+  margin-top: 0.35rem;
+  overflow: visible;
 }
 
-@keyframes splashPulseAnim {
-  0%, 100% { width: 48px; opacity: 0.5; }
-  50% { width: 80px; opacity: 1; }
+.welcomeIntroSpark path {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 320;
+  stroke-dashoffset: 320;
+  animation: welcomeIntroDraw 1.4s 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.45));
 }
 
-@keyframes splashBlink {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
+.welcomeIntroBar {
+  width: 72px;
+  height: 3px;
+  margin-top: 0.85rem;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #38bdf8, #2563eb);
+  animation: welcomeIntroPulse 1.4s 200ms ease-in-out infinite;
 }
+
+.welcomeIntroSkip {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 1.2rem;
+  border: 1px solid rgba(148, 180, 214, 0.35);
+  background: rgba(8, 18, 34, 0.35);
+  color: #d7e7f8;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
+}
+
+.welcomeIntroSkip:hover {
+  border-color: rgba(125, 211, 252, 0.7);
+  color: #fff;
+}
+
+@keyframes welcomeIntroRise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes welcomeIntroDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes welcomeIntroPulse {
+  0%, 100% { width: 56px; opacity: 0.55; }
+  50% { width: 96px; opacity: 1; }
+}
+
+@keyframes welcomeIntroDrift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(18px, -14px, 0); }
+}
+
+@keyframes welcomeIntroFade {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcomeIntroMark,
+  .welcomeIntroEyebrow,
+  .welcomeIntroTitle,
+  .welcomeIntroCopy,
+  .welcomeIntroSpark path,
+  .welcomeIntroBar,
+  .welcomeIntroOrb {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+html[data-theme="dark"] .welcomeIntroEyebrow {
+  color: #7fb4ea;
+}
+
+html[data-theme="dark"] .welcomeIntroTitle {
+  color: #f7fbff;
+}
+
+html[data-theme="dark"] .welcomeIntroCopy {
+  color: #9cb6d4;
+}
+
+html[data-theme="dark"] button.welcomeIntroSkip {
+  background: rgba(8, 18, 34, 0.35);
+  border-color: rgba(148, 180, 214, 0.35);
+  color: #d7e7f8;
+}
+
 
 /* ── Staggered fade-up animations ── */
 .fadeUp {
@@ -800,6 +953,30 @@ h2, h3, h4 { margin: 0; color: var(--ink); }
 
 .tag.muted { color: #3c5f8a; }
 
+.listTag {
+  white-space: nowrap;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.68rem;
+}
+
+.listTag--ipo {
+  background: #f4f1ea;
+  border-color: #d9d0c0;
+  color: #5c5142;
+}
+
+.listTag--scheme {
+  background: #eef3f8;
+  border-color: #c5d2e0;
+  color: #3d4f63;
+}
+
+.listTag--merger {
+  background: #f3f0f6;
+  border-color: #d4c9dc;
+  color: #4e4258;
+}
+
 .controlsV2 { padding: 1.1rem 1.2rem; }
 
 .controlsTopRow {
@@ -1487,6 +1664,552 @@ button:disabled {
 
 .conditionBoardChart {
   margin-top: 0.15rem;
+}
+
+.outlookBoard {
+  margin-top: 1.1rem;
+  display: grid;
+  gap: 0.85rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
+.outlookHorizons {
+  justify-content: flex-start;
+}
+
+.outlookFoot {
+  max-width: 46rem;
+}
+
+.outlookReveal {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.outlookCard {
+  animation: outlookCardIn 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.outlookReveal .outlookCard:nth-child(2) { animation-delay: 90ms; }
+.outlookReveal .outlookCard:nth-child(3) { animation-delay: 180ms; }
+
+@keyframes outlookCardIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.outlookLoading {
+  animation: outlookCardIn 420ms ease both;
+}
+
+.outlookSpan {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.outlookTrack {
+  position: relative;
+  height: 10px;
+  border-radius: 99px;
+  background: #e8eef5;
+  overflow: visible;
+}
+
+.outlookTrackFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #e7a3a3 0%, #f3e4b8 48%, #8ed4ae 100%);
+  animation: outlookGrow 720ms 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.outlookTrackMark {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 99px;
+  background: #fff;
+  border: 3px solid #1d4ed8;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.28);
+  transform: translateY(-50%) scale(0);
+  animation: outlookMark 380ms 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.outlookTrackCaps {
+  position: relative;
+  height: 1rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.outlookTrackCaps span:first-child { position: absolute; left: 0; }
+.outlookTrackCaps span:last-child { position: absolute; right: 0; }
+
+.outlookTrackMid {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--brand);
+}
+
+@keyframes outlookGrow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes outlookMark {
+  to { transform: translateY(-50%) scale(1); }
+}
+
+a.actionGhost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  border: 1px solid #c1d3e8;
+  border-radius: 8px;
+  padding: 0.52rem 0.64rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  box-sizing: border-box;
+}
+
+.forecastPicks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.forecastPick {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  border: 1px solid #c5d6ea;
+  background: #f4f8fe;
+  color: #35587f;
+  border-radius: 14px;
+  padding: 0.42rem 0.75rem;
+  text-align: left;
+  animation: outlookCardIn 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.forecastPick:nth-child(2) { animation-delay: 50ms; }
+.forecastPick:nth-child(3) { animation-delay: 100ms; }
+.forecastPick:nth-child(4) { animation-delay: 150ms; }
+
+.forecastPickSymbol {
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.forecastPickName {
+  color: #6d84a0;
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+
+.forecastPick:hover {
+  background: #e7f0fb;
+  border-color: #9eb6d4;
+}
+
+.forecastPick.isActive,
+.forecastPick.isActive:hover {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.forecastPick.isActive .forecastPickName,
+.forecastPick.isActive:hover .forecastPickName {
+  color: #3b6cb5;
+}
+
+.forecastNgxNote {
+  margin-top: 0.65rem;
+}
+
+.tickerOutlook {
+  scroll-margin-top: 1.2rem;
+}
+
+.actionGhost.isActive {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.liquidityFlag {
+  margin-top: 0.35rem;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+  scroll-margin-top: 1.2rem;
+}
+
+.liquidityFlag--red {
+  border-color: #f1b4b4;
+  background: linear-gradient(180deg, #fff7f7 0%, #fff1f1 100%);
+}
+
+.liquidityFlag--amber {
+  border-color: #ead59a;
+  background: linear-gradient(180deg, #fffdf5 0%, #fff8e8 100%);
+}
+
+.liquidityFlag--ok {
+  border-color: #b9e0c8;
+  background: linear-gradient(180deg, #f6fdf8 0%, #eef8f2 100%);
+}
+
+.liquidityFlag header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.liquidityFlag header h3 {
+  margin: 0.1rem 0 0;
+  font-size: 1.35rem;
+}
+
+.liquidityKicker {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.liquidityLead {
+  margin: 0.35rem 0 0;
+  max-width: 46rem;
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.liquidityFlagList {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.liquidityCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.6rem;
+}
+
+.liquidityCards article {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.liquidityCards article span {
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.liquidityCards article strong {
+  font-size: 1.05rem;
+}
+
+.liquidityCards article p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.liquidityFactors {
+  margin-top: 0.75rem;
+}
+
+.liquidityFactor--unknown strong {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.liquidityReason,
+.liquidityLimit {
+  display: block;
+  margin-top: 0.28rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.liquidityReason {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.liquidityLimit {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.liquidityFactor.isCause {
+  outline: 2px solid rgba(15, 118, 110, 0.45);
+}
+
+.liquidityFoot {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.liquidityFlag .liquidityMore,
+.liquidityFlag .liquidityMore:hover,
+html[data-theme="dark"] .liquidityFlag .liquidityMore {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  min-height: 0;
+  color: var(--brand);
+  font-weight: 700;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.liquiditySimple {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.liquiditySimple p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.liquidityLegend {
+  display: grid;
+  gap: 0.2rem;
+  margin-bottom: 0.75rem;
+}
+
+.liquidityLegend p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+}
+
+.liquidityFilters {
+  margin-bottom: 0.75rem;
+}
+
+.liquidityLegend p {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+button.tfBtn.liquidityFilter--red,
+html[data-theme="dark"] button.tfBtn.liquidityFilter--red {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+button.tfBtn.liquidityFilter--amber,
+html[data-theme="dark"] button.tfBtn.liquidityFilter--amber {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+button.tfBtn.liquidityFilter--ok,
+html[data-theme="dark"] button.tfBtn.liquidityFilter--ok {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+
+button.tfBtn.liquidityFilter.active,
+html[data-theme="dark"] button.tfBtn.liquidityFilter.active {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+
+span.liquidityTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 7.4rem;
+  padding: 0.32rem 0.7rem;
+  border-radius: 8px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+}
+
+span.liquidityTag--red,
+html[data-theme="dark"] span.liquidityTag--red {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+span.liquidityTag--amber,
+html[data-theme="dark"] span.liquidityTag--amber {
+  background: #d97706;
+  border-color: #b45309;
+  color: #fff;
+}
+
+span.liquidityTag--ok,
+html[data-theme="dark"] span.liquidityTag--ok {
+  background: #16a34a;
+  border-color: #15803d;
+  color: #fff;
+}
+
+.liquidityName {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+button.liquidityBtn,
+html[data-theme="dark"] button.liquidityBtn {
+  background: linear-gradient(180deg, #2dd4bf 0%, #0d9488 55%, #0f766e 100%);
+  border: 1px solid #0f766e;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  padding: 0.78rem 1.25rem;
+  min-height: 48px;
+  border-radius: 14px;
+  box-shadow: 0 10px 22px rgba(13, 148, 136, 0.32);
+}
+
+button.liquidityBtn:hover,
+html[data-theme="dark"] button.liquidityBtn:hover {
+  background: linear-gradient(180deg, #5eead4 0%, #14b8a6 45%, #0f766e 100%);
+  border-color: #115e59;
+  color: #fff;
+  box-shadow: 0 12px 26px rgba(13, 148, 136, 0.4);
+}
+
+button.liquidityBtn.isActive,
+html[data-theme="dark"] button.liquidityBtn.isActive {
+  background: linear-gradient(180deg, #0f766e 0%, #115e59 100%);
+  border-color: #134e4a;
+  color: #fff;
+}
+
+button.liquidityBack,
+html[data-theme="dark"] button.liquidityBack {
+  background: #0f766e;
+  border: 1px solid #0f766e;
+  color: #fff;
+  font-weight: 800;
+  min-height: 44px;
+  padding: 0.62rem 0.95rem;
+  border-radius: 12px;
+}
+
+.thinTicker,
+.thinSymbol {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+tr.isThin {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.liquidityRow--red {
+  background: rgba(220, 38, 38, 0.14);
+}
+
+.liquidityRow--red .thinSymbol,
+.liquidityRow--red .liquidityName {
+  color: #b91c1c;
+}
+
+.liquidityRow--amber {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.liquidityTable .ngxRow.isPickable {
+  cursor: pointer;
+}
+
+.outlookPageLink {
+  margin-top: 0.35rem;
+}
+
+.outlookPageLink a {
+  font-weight: 650;
+}
+
+html[data-theme="dark"] a.actionGhost {
+  background: #1b2533;
+  border-color: #3d4d63;
+  color: #c5d4e8;
+}
+
+html[data-theme="dark"] .forecastPick {
+  background: #1b2533;
+  border-color: #3d4d63;
+  color: #c5d4e8;
+}
+
+html[data-theme="dark"] .forecastPick:hover {
+  background: #243044;
+  border-color: #5b7190;
+}
+
+html[data-theme="dark"] .forecastPickName {
+  color: #93a8c3;
+}
+
+html[data-theme="dark"] .outlookTrack {
+  background: #243044;
+}
+
+html[data-theme="dark"] .outlookTrackMark {
+  background: #0f172a;
+  border-color: #93c5fd;
+}
+
+html[data-theme="dark"] .forecastPick.isActive,
+html[data-theme="dark"] .forecastPick.isActive:hover {
+  background: rgba(56, 132, 255, 0.16);
+  border-color: #60a5fa;
+  color: #dbeafe;
 }
 
 .marketSnapshotGrid {
@@ -5257,11 +5980,11 @@ button {
 }
 
 .pageEnter {
-  animation: pageEnter 380ms ease-out;
+  animation: pageEnter 460ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes pageEnter {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
 
@@ -5287,6 +6010,7 @@ button {
   padding: 1.15rem;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: var(--shadow-sm);
+  scroll-margin-top: 6.5rem;
 }
 
 .panel:hover {
@@ -7475,6 +8199,13 @@ html[data-theme="dark"] .workspaceTitle {
   color: #f8fafc;
 }
 
+html[data-theme="dark"] .welcomeHeadline {
+  background: linear-gradient(120deg, #f8fafc 0%, #dbeafe 46%, #93c5fd 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
 html[data-theme="dark"] .welcomeSubtitle,
 html[data-theme="dark"] .subtle,
 html[data-theme="dark"] .meta,
@@ -7489,6 +8220,85 @@ html[data-theme="dark"] .trustBadge {
   background: #172033;
   border-color: var(--line);
   color: #c5d4e8;
+}
+
+html[data-theme="dark"] .listTag--ipo {
+  background: #2a261f;
+  border-color: #5c5142;
+  color: #e6dcc8;
+}
+
+html[data-theme="dark"] .listTag--scheme {
+  background: #1a2433;
+  border-color: #3d5168;
+  color: #d5e2f0;
+}
+
+html[data-theme="dark"] .listTag--merger {
+  background: #241c2a;
+  border-color: #5a4864;
+  color: #eadff2;
+}
+
+html[data-theme="dark"] .liquidityFlag {
+  background: #121a2b;
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .liquidityFlag--red {
+  background: linear-gradient(180deg, #2a1518 0%, #1d1216 100%);
+  border-color: #7f1d1d;
+}
+
+html[data-theme="dark"] .liquidityFlag--amber {
+  background: linear-gradient(180deg, #2a2414 0%, #1d1a12 100%);
+  border-color: #854d0e;
+}
+
+html[data-theme="dark"] .liquidityFlag--ok {
+  background: linear-gradient(180deg, #14241c 0%, #121c18 100%);
+  border-color: #166534;
+}
+
+html[data-theme="dark"] .liquidityCards article {
+  background: rgba(8, 12, 22, 0.35);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+html[data-theme="dark"] .liquidityTag--red {
+  background: #dc2626;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+html[data-theme="dark"] .liquidityTag--amber {
+  background: #d97706;
+  border-color: #b45309;
+  color: #fff;
+}
+
+html[data-theme="dark"] .liquidityTag--ok {
+  background: #16a34a;
+  border-color: #15803d;
+  color: #fff;
+}
+
+html[data-theme="dark"] .liquidityRow--red {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+html[data-theme="dark"] h3.thinTicker,
+html[data-theme="dark"] .thinSymbol,
+html[data-theme="dark"] .liquidityRow--red .liquidityName {
+  color: #fecaca;
+}
+
+html[data-theme="dark"] tr.isThin {
+  background: rgba(220, 38, 38, 0.2);
+}
+
+html[data-theme="dark"] .liquidityRow--amber {
+  background: rgba(245, 158, 11, 0.12);
 }
 
 html[data-theme="dark"] input,
@@ -7719,8 +8529,7 @@ html[data-theme="dark"] .loadingLine {
 @media (prefers-reduced-motion: reduce) {
   .fadeUp,
   .pageEnter,
-  .splashLogo,
-  .splashPulse,
+  .outlookReveal,
   .welcomeChartLine {
     animation: none !important;
     opacity: 1 !important;
@@ -7798,6 +8607,14 @@ html[data-theme="dark"] .priceTag,
 html[data-theme="dark"] .anomalyCalloutTime,
 html[data-theme="dark"] .anomalyCalloutFacts dd {
   color: #f1f5f9;
+}
+
+html[data-theme="dark"] .monoNum.thinSymbol,
+html[data-theme="dark"] td.thinSymbol,
+html[data-theme="dark"] .thinSymbol,
+html[data-theme="dark"] h3.thinTicker,
+html[data-theme="dark"] .liquidityRow--red .liquidityName {
+  color: #fecaca;
 }
 
 html[data-theme="dark"] .stockInsightCard.positive,
@@ -8429,6 +9246,12 @@ html[data-theme="dark"] .guideWhen {
   gap: 1.6rem;
 }
 
+.learnHero,
+.learnSection,
+#brokers {
+  scroll-margin-top: 6.5rem;
+}
+
 .learnHero h1 {
   margin: 0.4rem 0 0.7rem;
   font-size: clamp(1.8rem, 4vw, 2.7rem);
@@ -8706,8 +9529,14 @@ button,
 .learnLessonHead,
 .learnBrokerCard,
 .welcomeOption,
-.conditionNames button {
-  transition: none !important;
+.conditionNames button,
+.ngxRow {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
 }
 
 button:hover,
@@ -8723,4 +9552,389 @@ button:focus,
 .moverCard:hover,
 .learnBrokerCard:hover {
   transform: none !important;
+}
+
+.learnPath {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.learnPathCard {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  min-height: 100%;
+  padding: 0.95rem 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel, #fff);
+  animation: outlookCardIn 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.learnPathCard span {
+  width: 1.7rem;
+  height: 1.7rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--brand-soft, #eff5ff);
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.learnPathCard strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.learnPathCard p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.learnPathCard a {
+  margin-top: 0.35rem;
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.learnLessonHead i {
+  flex: none;
+  width: 2rem;
+  color: var(--brand);
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.learnLessonBody {
+  display: grid;
+  grid-template-rows: 0fr;
+  padding: 0 1rem;
+  transition: grid-template-rows 380ms cubic-bezier(0.22, 1, 0.36, 1), padding 380ms ease;
+}
+
+.learnLesson.isOpen .learnLessonBody {
+  grid-template-rows: 1fr;
+  padding-bottom: 1rem;
+}
+
+.learnLessonBody > div {
+  overflow: hidden;
+}
+
+.learnScene {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 0.9rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(37, 99, 235, 0.08), transparent 55%),
+    var(--surface-subtle, #f8fafc);
+}
+
+.learnSceneTag {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.learnPriceRow,
+.learnMoney,
+.learnScene--steps,
+.learnScene--tags,
+.learnRange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.learnPriceRow strong,
+.learnMoney strong {
+  font-size: 1.35rem;
+  letter-spacing: -0.04em;
+  animation: outlookCardIn 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.learnPriceRow strong.isUp,
+.learnRange .isUp { color: #15803d; }
+.learnPriceRow i,
+.learnMoney i {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.learnPriceRow em {
+  margin-left: auto;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: #e8f8ef;
+  color: #15803d;
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.learnSpark {
+  width: 100%;
+  height: 88px;
+}
+
+.learnSpark path {
+  fill: none;
+  stroke: #2563eb;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-dasharray: 360;
+  stroke-dashoffset: 360;
+  animation: welcomeIntroDraw 1.1s 120ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.learnSpark circle { fill: #2563eb; }
+.learnSpark .isAvg { stroke: #7c93ad; stroke-width: 2; }
+.learnSpark .isGold { fill: none; stroke: #d4a017; stroke-width: 2; }
+.learnSpark .isWine { fill: #7f1d1d; }
+
+.learnStack { display: grid; gap: 0.4rem; }
+.learnStack div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+}
+.learnStack span { color: var(--ink-soft); font-size: 0.82rem; }
+.learnStack strong { font-size: 0.95rem; }
+.learnRange small {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.learnBars { display: grid; gap: 0.45rem; }
+.learnBars div { display: grid; gap: 0.25rem; }
+.learnBars span {
+  display: block;
+  height: 8px;
+  border-radius: 99px;
+  background: #15803d;
+  transform-origin: left center;
+  animation: outlookGrow 700ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.learnBars span.isDown { background: #b91c1c; }
+.learnBars small { color: var(--ink-soft); font-size: 0.78rem; }
+
+.learnRange { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; }
+.learnRange--pair { grid-template-columns: 1fr 1fr; }
+.learnRange article {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  animation: outlookCardIn 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.learnRange article:nth-child(2) { animation-delay: 80ms; }
+.learnRange article:nth-child(3) { animation-delay: 160ms; }
+.learnRange article.isMid { border-color: #c7ead4; background: #f3fbf6; }
+.learnRange span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.learnRange strong { font-size: 0.92rem; }
+.learnRange .isDown { color: #b91c1c; }
+
+.learnTag {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  animation: outlookCardIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.learnTag--red { background: #fde8e8; color: #9f1239; animation-delay: 0ms; }
+.learnTag--amber { background: #fef3c7; color: #92400e; animation-delay: 80ms; }
+.learnTag--ok { background: #e8f8ef; color: #166534; animation-delay: 160ms; }
+
+.learnScene--money,
+.learnScene--steps { display: grid; grid-template-columns: 1fr 1fr; }
+.learnMoney,
+.learnScene--steps div {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.7rem;
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line);
+}
+.learnScene--steps b {
+  width: 1.4rem;
+  height: 1.4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.75rem;
+}
+.learnScene--steps span { color: var(--ink); font-size: 0.85rem; font-weight: 700; }
+
+.learnChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.learnChip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel, #fff);
+  color: var(--ink-soft);
+  padding: 0.32rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.learnChip.isActive {
+  background: var(--brand-soft, #eff5ff);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.learnTermStage {
+  margin-top: 0.8rem;
+  padding: 1rem 1.05rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel, #fff);
+  animation: outlookCardIn 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.learnTermStage h3 { margin: 0 0 0.35rem; }
+.learnTermStage p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.learnBrokerGrid li {
+  animation: outlookCardIn 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+html[data-theme="dark"] .learnPathCard,
+html[data-theme="dark"] .learnScene,
+html[data-theme="dark"] .learnTermStage,
+html[data-theme="dark"] .learnChip,
+html[data-theme="dark"] .learnMoney,
+html[data-theme="dark"] .learnScene--steps div,
+html[data-theme="dark"] .learnRange article {
+  background: #17233a;
+  border-color: #2a3d5a;
+  color: #e8eef8;
+}
+
+html[data-theme="dark"] .learnRange article.isMid {
+  background: #163024;
+  border-color: #27563a;
+}
+
+html[data-theme="dark"] .learnStack div {
+  background: #121b2e;
+  border-color: #2a3d5a;
+}
+
+html[data-theme="dark"] .learnPathCard p,
+html[data-theme="dark"] .learnTermStage p,
+html[data-theme="dark"] .learnBars small {
+  color: #b7c6da;
+}
+
+html[data-theme="dark"] .learnChip.isActive {
+  background: rgba(56, 132, 255, 0.16);
+  color: #dbeafe;
+}
+
+@media (max-width: 800px) {
+  .learnPath,
+  .learnRange,
+  .learnScene--money,
+  .learnScene--steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pageEnter,
+  .outlookReveal,
+  .fadeUp,
+  .welcomeIntro,
+  .welcomeIntro.isLeaving {
+    animation: none !important;
+  }
+
+  button,
+  a,
+  .tfBtn,
+  .ngxRow,
+  .forecastPick,
+  .welcomeIntroSkip {
+    transition: none !important;
+  }
+
+  .outlookCard,
+  .outlookTrackFill,
+  .outlookTrackMark,
+  .outlookLoading,
+  .forecastPick {
+    animation: none !important;
+  }
+
+  .outlookTrackFill {
+    transform: none !important;
+  }
+
+  .outlookTrackMark {
+    transform: translateY(-50%) scale(1) !important;
+  }
+
+  .learnPathCard,
+  .learnSpark path,
+  .learnPriceRow strong,
+  .learnBars span,
+  .learnRange article,
+  .learnTag,
+  .learnTermStage,
+  .learnBrokerGrid li {
+    animation: none !important;
+  }
+
+  .learnSpark path {
+    stroke-dashoffset: 0 !important;
+  }
+
+  .learnLessonBody {
+    transition: none !important;
+  }
 }

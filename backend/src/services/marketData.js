@@ -223,7 +223,7 @@ export async function fetchStockSeriesWithFallback(symbol, range = '3mo', interv
       opts.period1 = new Date(Number(period1) * 1000);
       opts.period2 = new Date(Number(period2) * 1000);
     } else {
-      const rangeMap = { '1d': 2, '7d': 7, '1mo': 30, '2mo': 60, '3mo': 90, '1y': 365, 'max': 3650 };
+      const rangeMap = { '1d': 2, '7d': 7, '1mo': 30, '2mo': 60, '3mo': 90, '1y': 365, '10y': 3650, 'max': 3650 };
       const days = rangeMap[range] || 90;
       opts.period1 = new Date(Date.now() - days * 24 * 3600 * 1000);
     }
@@ -308,11 +308,60 @@ async function fetchYahooCryptoSeries(id, days, hintTicker) {
 
 export async function fetchCryptoSeriesWithFallback(id, days = 90, options = {}) {
   const hintTicker = options.symbol || '';
-  const cacheKey = `crypto:${id}:${days}:${String(hintTicker).toUpperCase()}`;
+  const dayCount = days === 'max' ? 3650 : Number(days);
+  const skipGecko = Boolean(options.preferYahoo) || (Number.isFinite(dayCount) && dayCount > 365);
+  const cacheKey = `crypto:${id}:${days}:${String(hintTicker).toUpperCase()}:${skipGecko ? 'y' : 'g'}`;
   const hit = cached(cacheKey);
   if (hit) return hit;
 
   return dedupe(cacheKey, async () => {
+    const loadYahoo = async (reason) => {
+      const data = await fetchYahooCryptoSeries(id, days, hintTicker);
+      setProviderHealth('yahoo-finance', { ok: true, errorRate: 0, latencyHint: 'normal' });
+      const out = {
+        raw: data,
+        metadata: buildMarketMetadata({
+          provider: 'yahoo-finance',
+          dataKind: 'historical',
+          fallbackUsed: Boolean(reason),
+          fallbackReason: reason || null,
+          rangeStart: data.prices?.[0]?.[0] ? new Date(data.prices[0][0]).toISOString() : null,
+          rangeEnd: data.prices?.at(-1)?.[0] ? new Date(data.prices.at(-1)[0]).toISOString() : null,
+        }),
+      };
+      cache(cacheKey, out);
+      return out;
+    };
+
+    if (skipGecko) {
+      try {
+        return await loadYahoo('coingecko-public-365-day-cap');
+      } catch {
+        try {
+          const data = await fetchCoinGeckoSeries(id, 365);
+          setProviderHealth('coingecko', { ok: true, errorRate: 0, latencyHint: 'normal' });
+          const out = {
+            raw: data,
+            metadata: buildMarketMetadata({
+              provider: 'coingecko',
+              dataKind: 'historical',
+              fallbackUsed: true,
+              fallbackReason: 'yahoo-unavailable-gecko-365',
+              rangeStart: data.prices?.[0]?.[0] ? new Date(data.prices[0][0]).toISOString() : null,
+              rangeEnd: data.prices?.at(-1)?.[0] ? new Date(data.prices.at(-1)[0]).toISOString() : null,
+            }),
+          };
+          cache(cacheKey, out);
+          return out;
+        } catch (error) {
+          const wrapped = new Error(`Chart history is unavailable for ${id}`);
+          wrapped.code = 'HISTORY_UNAVAILABLE';
+          wrapped.cause = error;
+          throw wrapped;
+        }
+      }
+    }
+
     try {
       const data = await fetchCoinGeckoSeries(id, days);
       setProviderHealth('coingecko', { ok: true, errorRate: 0, latencyHint: 'normal' });
@@ -536,7 +585,22 @@ export async function fetchNgxFundamentals(symbol) {
   return dedupe(cacheKey, async () => {
     try {
       const { data } = await fetchNgxEndpoint(`${NGX_BASE}/fundamentals/${encodeURIComponent(normalizedSymbol)}`, key);
-      const out = { symbol: normalizedSymbol, fundamentals: data?.data || data || null, planLimited: false };
+      const body = data?.data ?? data ?? {};
+      const row = body?.fundamentals && typeof body.fundamentals === 'object' ? body.fundamentals : body;
+      const pick = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      };
+      const out = {
+        symbol: normalizedSymbol,
+        fundamentals: {
+          peRatio: pick(row.pe_ratio ?? row.peRatio),
+          eps: pick(row.eps),
+          dividendPerShare: pick(row.dividend_per_share ?? row.dividendPerShare),
+          dividendYield: pick(row.dividend_yield ?? row.dividendYield),
+        },
+        planLimited: false,
+      };
       cache(cacheKey, out);
       return out;
     } catch (error) {

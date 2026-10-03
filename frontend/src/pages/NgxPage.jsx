@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, CartesianGrid, Cell, Legend, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
   PieChart, Pie,
@@ -10,12 +11,17 @@ import {
   fetchNgxStocks,
   fetchNgxMarket,
   fetchNgxNews,
+  fetchNgxOutlook,
   searchNgx,
 } from '../lib/api';
 import { HelpHint } from '../components/HelpHint';
 import { ConditionBoard } from '../components/ConditionBoard';
 import { MarketChart } from '../components/MarketChart';
+import { LiquidityFlag } from '../components/LiquidityFlag';
+import { OutlookPanel } from '../components/OutlookPanel';
+import { LiquidityBoard } from '../components/LiquidityBoard';
 import { matchesSearch, searchRank } from '../lib/textSearch';
+import { assessLiquidity, scoreLiquidityBoard, sessionAverages } from '../lib/liquidity';
 import {
   conditionFromAvg,
   seriesReturn,
@@ -75,6 +81,43 @@ function stockChange(s) {
   return sessionChange(s) ?? 0;
 }
 
+function listingLabel(method) {
+  if (method === 'introduction') return 'Introduction';
+  if (method === 'ipo') return 'IPO';
+  if (method === 'scheme') return 'Share exchange';
+  if (method === 'merger') return 'Merger';
+  return 'Not stated';
+}
+
+function listingExplain(stock) {
+  const method = stock?.listing_method;
+  const lead = method === 'introduction'
+    ? 'Listed by introduction. The shares were already issued, and no public offer was made on NGX at listing.'
+    : method === 'ipo'
+      ? 'IPO. Shares were sold to the public as part of the listing.'
+      : method === 'scheme'
+        ? 'Share exchange. A listed company was delisted and these shares replaced it under a scheme of arrangement. No public offer.'
+        : method === 'merger'
+          ? 'Merger. The shares were listed when companies combined. No separate public offer was made at that listing.'
+          : 'Not stated. The first listing does not say how the shares were admitted. Later share sales do not count.';
+  const dated = stock?.listing_method_as_of ? ` Listed ${formatTradeDate(stock.listing_method_as_of)}.` : '';
+  const source = stock?.listing_method_source ? ` ${stock.listing_method_source}.` : '';
+  return `${lead}${dated}${source}`;
+}
+
+function ListingTag({ stock }) {
+  const method = stock?.listing_method;
+  const known = method === 'introduction' || method === 'ipo' || method === 'scheme' || method === 'merger';
+  return (
+    <span
+      className={known ? `tag listTag listTag--${method}` : 'tag muted listTag'}
+      title={stock?.listing_method_source || undefined}
+    >
+      {listingLabel(method)}
+    </span>
+  );
+}
+
 function changeLabel(s) {
   if (s.change_percent != null) return 'daily';
   if (s.current_price && s.previous_close && s.current_price !== s.previous_close) return 'daily';
@@ -95,6 +138,9 @@ const NGX_TIMEFRAMES = [
 ];
 
 export function NgxPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const urlSymbol = useRef(null);
   const [overview, setOverview] = useState(null);
   const [allStocks, setAllStocks] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -102,6 +148,10 @@ export function NgxPage() {
   const [newsLoaded, setNewsLoaded] = useState(false);
   const [company, setCompany] = useState(null);
   const [companyLoading, setCompanyLoading] = useState(false);
+  const [outlookYears, setOutlookYears] = useState(3);
+  const [outlook, setOutlook] = useState(null);
+  const [outlookError, setOutlookError] = useState('');
+  const [outlookLoading, setOutlookLoading] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
@@ -112,6 +162,7 @@ export function NgxPage() {
   const [vizTab, setVizTab] = useState('performance');
   const [filterSector, setFilterSector] = useState('all');
   const [filterCap, setFilterCap] = useState('all');
+  const [filterListing, setFilterListing] = useState('all');
   const [sortBy, setSortBy] = useState('market_cap');
   const [breadthView, setBreadthView] = useState('all');
   const [error, setError] = useState('');
@@ -130,6 +181,15 @@ export function NgxPage() {
   const debounceRef = useRef(null);
   const searchSeq = useRef(0);
   const selectedPanelRef = useRef(null);
+  const liquidityRef = useRef(null);
+  const browseRef = useRef(null);
+  const breadthRef = useRef(null);
+  const vizRef = useRef(null);
+  const conditionRef = useRef(null);
+  const [showLiquidity, setShowLiquidity] = useState(false);
+  const [fromLiquidity, setFromLiquidity] = useState(false);
+  const [liquidityListKey, setLiquidityListKey] = useState(0);
+  const scrollAfterClose = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,6 +235,51 @@ export function NgxPage() {
     if (!selected || !selectedPanelRef.current) return;
     selectedPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selected]);
+
+  useEffect(() => {
+    const incoming = String(searchParams.get('symbol') || '').trim().toUpperCase();
+    if (!incoming) {
+      if (urlSymbol.current) {
+        urlSymbol.current = '';
+        setSelected(null);
+        setSearchInput('');
+        setSearchOpen(false);
+        if (!scrollAfterClose.current) scrollAfterClose.current = browseRef;
+      }
+      return;
+    }
+    const match = allStocks.find((stock) => String(stock.symbol || '').toUpperCase() === incoming);
+    if (!match) return;
+    if (urlSymbol.current === incoming && selected?.symbol === match.symbol) return;
+    urlSymbol.current = incoming;
+    setSelected(match);
+    setSearchInput(match.symbol || incoming);
+    setSearchOpen(false);
+  }, [searchParams, allStocks, selected?.symbol]);
+
+  useEffect(() => {
+    if (!location.state?.board) return;
+    setShowLiquidity(false);
+    setFromLiquidity(false);
+    setFilterSector('all');
+    setFilterCap('all');
+    setFilterListing('all');
+    urlSymbol.current = '';
+    setSelected(null);
+    setSearchInput('');
+    setSearchOpen(false);
+  }, [location.state]);
+
+  useEffect(() => {
+    if (selected) return undefined;
+    const target = scrollAfterClose.current;
+    if (!target) return undefined;
+    const timer = window.setTimeout(() => {
+      scrollAfterClose.current = null;
+      target.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [selected, showLiquidity]);
 
   useEffect(() => {
     const symbol = selected?.symbol;
@@ -265,13 +370,95 @@ export function NgxPage() {
   const allMajorNewsRows = useMemo(() => selectedNews || [], [selectedNews]);
   const topHeadlineLabel = selected?.name || selected?.symbol || 'Nigerian market';
 
-  function pickStock(stock) {
+  function clearSymbolParam() {
+    const params = new URLSearchParams(searchParams);
+    if (!params.get('symbol')) return;
+    params.delete('symbol');
+    setSearchParams(params, { replace: true });
+  }
+
+  function pickStock(stock, source = '') {
+    const next = String(stock?.symbol || '').trim().toUpperCase();
+    if (!next) return;
+    setFromLiquidity(source === 'liquidity');
     setSelectedNews([]);
     setNewsLoaded(false);
+    urlSymbol.current = next;
     setSelected(stock);
     setSearchInput(stock.symbol || stock.name);
     setSearchOpen(false);
     setSearchResults([]);
+    const params = new URLSearchParams(searchParams);
+    if (params.get('symbol') === next) return;
+    params.set('symbol', next);
+    setSearchParams(params);
+  }
+
+  function closeStock() {
+    scrollAfterClose.current = fromLiquidity ? liquidityRef : browseRef;
+    if (fromLiquidity) setShowLiquidity(true);
+    setFromLiquidity(false);
+    urlSymbol.current = '';
+    setSelected(null);
+    setSearchInput('');
+    setSearchOpen(false);
+    clearSymbolParam();
+  }
+
+  function focusSection(ref) {
+    window.requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function chooseTimeframe(id) {
+    setTimeframe(id);
+    focusSection(selected ? selectedPanelRef : conditionRef);
+  }
+
+  function leaveOpenName(ref) {
+    scrollAfterClose.current = ref;
+    if (!selected) {
+      focusSection(ref);
+      return;
+    }
+    urlSymbol.current = '';
+    setFromLiquidity(false);
+    setSelected(null);
+    setSearchInput('');
+    setSearchOpen(false);
+    clearSymbolParam();
+  }
+
+  function chooseBreadth(view) {
+    setBreadthView(view);
+    leaveOpenName(breadthRef);
+  }
+
+  function chooseViz(tab) {
+    setVizTab(tab);
+    leaveOpenName(vizRef);
+  }
+
+  function openLiquidity() {
+    setFilterSector('all');
+    setFilterCap('all');
+    setFilterListing('all');
+    setShowLiquidity(true);
+    setLiquidityListKey((key) => key + 1);
+    setFromLiquidity(false);
+    setSearchOpen(false);
+    scrollAfterClose.current = liquidityRef;
+    if (selected) {
+      urlSymbol.current = '';
+      setSelected(null);
+      setSearchInput('');
+      clearSymbolParam();
+      return;
+    }
+    window.setTimeout(() => {
+      liquidityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
   }
 
   const tfDays = useMemo(() => {
@@ -295,7 +482,10 @@ export function NgxPage() {
     () => (selectedHistoryKey === activeSelectedKey ? selectedHistorySeries : []),
     [selectedHistoryKey, activeSelectedKey, selectedHistorySeries],
   );
-  const compositeIndex = indexHistoryKey === historyRequestKey ? indexHistorySeries : [];
+  const compositeIndex = useMemo(
+    () => (indexHistoryKey === historyRequestKey ? indexHistorySeries : []),
+    [indexHistoryKey, historyRequestKey, indexHistorySeries],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -324,6 +514,31 @@ export function NgxPage() {
       cancelled = true;
     };
   }, [historyOptions, historyRequestKey]);
+
+  useEffect(() => {
+    if (!selected?.symbol) {
+      setOutlook(null);
+      setOutlookError('');
+      setOutlookLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setOutlookLoading(true);
+    setOutlookError('');
+    fetchNgxOutlook(selected.symbol, outlookYears)
+      .then((payload) => {
+        if (cancelled) return;
+        setOutlook(payload);
+        setOutlookLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setOutlook(null);
+        setOutlookError(err.message || 'Outlook unavailable');
+        setOutlookLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selected?.symbol, outlookYears]);
 
   useEffect(() => {
     if (!selected) return undefined;
@@ -512,6 +727,9 @@ export function NgxPage() {
     else if (filterCap === 'mid') list = list.filter((s) => (s.market_cap || 0) >= 100e9 && (s.market_cap || 0) < 1e12);
     else if (filterCap === 'small') list = list.filter((s) => (s.market_cap || 0) < 100e9);
 
+    if (filterListing === 'unknown') list = list.filter((s) => !s.listing_method);
+    else if (filterListing !== 'all') list = list.filter((s) => s.listing_method === filterListing);
+
     const dir = sortBy.startsWith('-') ? -1 : 1;
     const key = sortBy.replace('-', '');
     list = [...list].sort((a, b) => {
@@ -524,7 +742,7 @@ export function NgxPage() {
     });
 
     return list;
-  }, [allStocks, filterSector, filterCap, sortBy]);
+  }, [allStocks, filterSector, filterCap, filterListing, sortBy]);
 
   const selectedChange = useMemo(() => {
     if (!selectedSeries.length) return { pct: 0, isPositive: true };
@@ -552,6 +770,66 @@ export function NgxPage() {
       }));
   }, [selected, allStocks]);
 
+  const marketOpenKnown = overview?.is_open === true ? true : overview?.is_open === false ? false : null;
+
+  const liquidityBoardAll = useMemo(() => scoreLiquidityBoard(
+    allStocks.map((stock) => ({
+      venue: 'ngx',
+      symbol: stock.symbol,
+      name: stock.name,
+      sector: stock.sector,
+      volume: stock.volume,
+      sharesOutstanding: stock.shares_outstanding,
+      floatShares: stock.float_shares,
+      price: stock.current_price,
+      marketCap: stock.market_cap,
+      bid: stock.bid,
+      ask: stock.ask,
+      listingStatus: stock.listing_status,
+      corporateAction: stock.corporate_action,
+      corporateActionNote: stock.corporate_action_note,
+    })),
+    'ngx',
+    { marketOpen: marketOpenKnown },
+  ), [allStocks, marketOpenKnown]);
+
+  const liquidityBySymbol = useMemo(() => {
+    const map = new Map();
+    liquidityBoardAll.forEach((row) => map.set(row.symbol, row));
+    return map;
+  }, [liquidityBoardAll]);
+
+  const historyAverages = useMemo(() => {
+    if (!selected || !selectedHistoryKey.startsWith(`${selected.symbol}:`)) return null;
+    return sessionAverages(selectedHistorySeries);
+  }, [selected, selectedHistoryKey, selectedHistorySeries]);
+
+  const liquidityReading = useMemo(() => {
+    if (!selected) return null;
+    return assessLiquidity({
+      venue: 'ngx',
+      symbol: selected.symbol,
+      volume: company?.volume ?? selected.volume,
+      sharesOutstanding: company?.sharesOutstanding ?? selected.shares_outstanding,
+      floatShares: selected.float_shares,
+      price: company?.price ?? selected.current_price,
+      marketCap: company?.marketCap ?? selected.market_cap,
+      bid: selected.bid,
+      ask: selected.ask,
+      listingStatus: selected.listing_status,
+      corporateAction: selected.corporate_action,
+      corporateActionNote: selected.corporate_action_note,
+      averageVolume: historyAverages?.averageVolume,
+      averageValue: historyAverages?.averageValue,
+      averageSessions: historyAverages?.averageSessions,
+    }, {
+      venue: 'ngx',
+      peerTurnovers: liquidityBoardAll.map((row) => row.turnover),
+      peerCaps: liquidityBoardAll.map((row) => row.marketCap),
+      marketOpen: marketOpenKnown,
+    });
+  }, [selected, company, liquidityBoardAll, historyAverages, marketOpenKnown]);
+
   return (
     <main className="layout">
       {/* ── Controls ── */}
@@ -571,6 +849,13 @@ export function NgxPage() {
             <span className={`tag ${marketOpen ? '' : 'muted'}`}>
               {marketOpen ? '● Market Open' : marketStatus === 'NSE_PREOPEN' ? '◐ Pre-Open' : '○ Market Closed'}
             </span>
+            <button
+              type="button"
+              className={showLiquidity && !selected ? 'liquidityBtn isActive' : 'liquidityBtn'}
+              onClick={openLiquidity}
+            >
+              Liquidity
+            </button>
           </div>
         </div>
 
@@ -585,7 +870,7 @@ export function NgxPage() {
               placeholder="Search NGX — DANGCEM, GTCO, ZENITHBANK..."
             />
             {searchInput && (
-              <button type="button" className="searchClear" onClick={() => { setSearchInput(''); setSearchOpen(false); setSelected(null); }}>✕</button>
+              <button type="button" className="searchClear" onClick={() => { setSearchOpen(false); closeStock(); setSearchInput(''); }}>✕</button>
             )}
             {showDropdown && (
               <ul className="suggestionList">
@@ -616,7 +901,7 @@ export function NgxPage() {
 
           <div className="timeframeBar">
             {NGX_TIMEFRAMES.map((item) => (
-              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -729,7 +1014,7 @@ export function NgxPage() {
         </section>
       )}
 
-      <section className="panel">
+      <section className="panel" ref={conditionRef}>
           <div className="sectionHead">
             <h3>Official NGX All-Share Index History</h3>
             <span className="tag muted">
@@ -760,7 +1045,7 @@ export function NgxPage() {
 
       {/* ── Sector Performance + Breadth ── */}
       {conditionData.length > 0 && (
-        <section className="panel">
+        <section className="panel" ref={breadthRef}>
           <div className="sectionHead">
             <h3>Sector Performance &amp; Breadth</h3>
             <span className="tag muted">Current-session snapshot</span>
@@ -795,20 +1080,20 @@ export function NgxPage() {
                 </ResponsiveContainer>
               </div>
               <div className="breadthQuickGrid" style={{ marginTop: '0.3rem' }}>
-                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => setBreadthView('advancing')}>
+                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => chooseBreadth('advancing')}>
                   <div className="breadthQuickLabel">Advancing</div>
                   <div className="monoNum breadthQuickValue">{breadthData[0].value}</div>
                 </button>
-                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => setBreadthView('declining')}>
+                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => chooseBreadth('declining')}>
                   <div className="breadthQuickLabel">Declining</div>
                   <div className="monoNum breadthQuickValue">{breadthData[1].value}</div>
                 </button>
-                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => setBreadthView('unchanged')}>
+                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => chooseBreadth('unchanged')}>
                   <div className="breadthQuickLabel">Unchanged</div>
                   <div className="monoNum breadthQuickValue">{breadthData[2].value}</div>
                 </button>
               </div>
-              <button type="button" className="breadthShowAll" onClick={() => setBreadthView('all')}>Show All</button>
+              <button type="button" className="breadthShowAll" onClick={() => chooseBreadth('all')}>Show All</button>
             </div>
           </div>
           <div className="ngxTable" style={{ marginTop: '0.8rem', maxHeight: 260, overflowY: 'auto' }}>
@@ -883,9 +1168,17 @@ export function NgxPage() {
                   {selectedChange.isPositive ? '▲' : '▼'} {selectedChange.isPositive ? '+' : ''}{selectedChange.pct.toFixed(2)}%
                 </span>
               ) : <span className="tag muted">Snapshot quote</span>}
-              <button type="button" className="expandBtn" onClick={() => setSelected(null)}>← Back</button>
+              {liquidityReading?.tone && liquidityReading.tone !== 'unknown' && (
+                <span className={`tag liquidityTag liquidityTag--${liquidityReading.tone}`}>{liquidityReading.label}</span>
+              )}
+              <ListingTag stock={selected} />
+              <button type="button" className="liquidityBtn" onClick={openLiquidity}>Liquidity</button>
+              <button type="button" className={fromLiquidity ? 'liquidityBack' : 'expandBtn'} onClick={closeStock}>
+                {fromLiquidity ? '← Back to liquidity' : '← Back'}
+              </button>
             </div>
           </div>
+          <p className="subtle" style={{ marginTop: '0.45rem' }}>{listingExplain(selected)}</p>
           <div className="sectionHead" style={{ marginTop: '0.5rem' }}>
             <div>
               <h4>Analysis Horizon</h4>
@@ -894,7 +1187,7 @@ export function NgxPage() {
           </div>
           <div className="timeframeBar">
             {NGX_TIMEFRAMES.map((item) => (
-              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -941,7 +1234,25 @@ export function NgxPage() {
             <article className="metricCard"><span>Volume</span><strong className="monoNum">{selected.volume ? Number(selected.volume).toLocaleString() : 'Pre-market'}</strong></article>
             {selected.market_cap != null && <article className="metricCard"><span>Market Cap</span><strong className="monoNum">{formatCap(selected.market_cap)}</strong></article>}
             {selected.pe_ratio != null && <article className="metricCard"><span>P/E Ratio</span><strong className="monoNum">{selected.pe_ratio}</strong></article>}
-            {selected.shares_outstanding != null && <article className="metricCard"><span>Shares Outstanding</span><strong className="monoNum">{(selected.shares_outstanding / 1e9).toFixed(2)}B</strong></article>}
+            {selected.shares_outstanding != null && <article className="metricCard"><span>Shares Outstanding</span><strong className="monoNum">{formatShareCount(selected.shares_outstanding)}</strong></article>}
+          </div>
+
+          <div className="tickerOutlook">
+            <LiquidityFlag reading={liquidityReading} name={selected.symbol} />
+            <OutlookPanel
+              title={`${selected.symbol} over the next ${outlookYears} year${outlookYears === 1 ? '' : 's'}`}
+              hint="Weaker, typical, and stronger are three pictures from this listing’s own daily prices. The year buttons are how long you might hold it. They do not change the chart."
+              years={outlookYears}
+              onYears={setOutlookYears}
+              data={outlook}
+              error={outlookError}
+              loading={outlookLoading}
+              formatPrice={(n) => formatNgn(n)}
+            />
+            <p className="subtle outlookPageLink">
+              <Link to={`/forecast?market=ngx&symbol=${encodeURIComponent(selected.symbol)}&years=${outlookYears}`}>Open this range on Forecast</Link>
+              {' '}to pick another NGX name.
+            </p>
           </div>
 
           <div className="stockProfile">
@@ -971,10 +1282,11 @@ export function NgxPage() {
                     { label: 'Market cap', value: company.marketCap ? formatCap(company.marketCap) : '—' },
                     { label: 'Shares outstanding', value: formatShareCount(company.sharesOutstanding) },
                     { label: 'P/E ratio', value: Number.isFinite(company.peRatio) ? company.peRatio.toFixed(2) : '—' },
-                    { label: 'EPS (implied by P/E)', value: Number.isFinite(company.epsImplied) ? formatNgn(company.epsImplied) : '—' },
+                    { label: Number.isFinite(company.eps) ? 'EPS' : 'EPS (implied by P/E)', value: Number.isFinite(company.eps) ? formatNgn(company.eps) : (Number.isFinite(company.epsImplied) ? formatNgn(company.epsImplied) : '—') },
                     { label: 'Dividend per share (latest)', value: Number.isFinite(company.earnings?.latestPerShare) ? formatNgn(company.earnings.latestPerShare) : '—' },
                     { label: 'Dividend yield (12 months)', value: formatPct(company.earnings?.dividendYieldPct) },
                     { label: 'Listing board', value: company.board || '—' },
+                    { label: 'How it listed', value: listingLabel(selected.listing_method) },
                   ].map((fact) => (
                     <article key={fact.label} className="metricCard">
                       <span>{fact.label}</span>
@@ -982,9 +1294,9 @@ export function NgxPage() {
                     </article>
                   ))}
                 </div>
-                {!Number.isFinite(company.peRatio) && (
+                {company.earnings?.fundamentalsPlanLimited && !Number.isFinite(company.peRatio) && (
                   <p className="subtle" style={{ marginTop: '0.6rem' }}>
-                    P/E and EPS are blank because the free NGX Pulse tier returns prices, volume, market cap and shares outstanding only — earnings figures are on its paid tier, so nothing has been estimated here.
+                    P/E and EPS are blank because this NGX Pulse key does not include company earnings. Nothing has been estimated to fill them.
                   </p>
                 )}
               </>
@@ -997,7 +1309,7 @@ export function NgxPage() {
                 <div>
                   <h4>
                     Earnings &amp; dividends
-                    <HelpHint text="NGX Pulse gives cash dividends per share for Nigerian listings. The 12-month total and the yield are added up here from these rows and the latest price, so they are marked as computed. Full income statements sit behind a paid tier of the same API, so they are left out rather than guessed." />
+                    <HelpHint text="NGX Pulse gives cash dividends per share for Nigerian listings. The 12-month total and the yield are added up here from these rows and the latest price. P/E and EPS are the figures Pulse returns for this company." />
                   </h4>
                   <p className="subtle">
                     Cash dividends NGX Pulse holds for {company.symbol}
@@ -1150,16 +1462,16 @@ export function NgxPage() {
 
       {/* ── Market Visualizer tabs ── */}
       {allStocks.length > 0 && (
-        <section className="panel">
+        <section className="panel" ref={vizRef}>
           <div className="sectionHead">
             <div>
               <h3>NGX Snapshot Visualizer</h3>
               <p className="subtle">Performance bars use the provider&apos;s current daily change; they do not follow the historical chart timeframe.</p>
             </div>
             <div className="timeframeBar">
-              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('performance')}>Performance</button>
-              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('marketcap')}>Market Cap</button>
-              <button type="button" className={vizTab === 'sectors' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('sectors')}>Sectors</button>
+              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('performance')}>Performance</button>
+              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('marketcap')}>Market Cap</button>
+              <button type="button" className={vizTab === 'sectors' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('sectors')}>Sectors</button>
             </div>
           </div>
 
@@ -1227,8 +1539,28 @@ export function NgxPage() {
       )}
 
       {/* ── All Equities table with filters ── */}
+      {allStocks.length > 0 && !selected && showLiquidity && (
+        <section className="panel" ref={liquidityRef}>
+          <div className="sectionHead">
+            <div>
+              <h3>Liquidity</h3>
+              <p className="subtle">Red means a normal ₦500,000 sale would be a big part of everything that traded — the “you can buy it, then struggle to sell” problem. NGX does not publish owners, so we never claim a named group holds 80%.</p>
+            </div>
+            <button type="button" className="expandBtn" onClick={() => setShowLiquidity(false)}>Close</button>
+          </div>
+          <LiquidityBoard
+            listKey={liquidityListKey}
+            rows={liquidityBoardAll}
+            onPick={(row) => {
+              const full = allStocks.find((stock) => stock.symbol === row.symbol);
+              if (full) pickStock(full, 'liquidity');
+            }}
+          />
+        </section>
+      )}
+
       {allStocks.length > 0 && !selected && (
-        <section className="panel">
+        <section className="panel" ref={browseRef}>
           <div className="sectionHead">
             <h3>All Listed Equities</h3>
             <span className="tag muted">{filteredStocks.length} of {allStocks.length} stocks</span>
@@ -1236,11 +1568,26 @@ export function NgxPage() {
 
           <div className="ngxFilters">
             <div className="ngxFilterGroup">
+              <label className="ngxFilterLabel">
+                How listed
+                <HelpHint text="Introduction: shares were already issued. IPO: shares were sold to the public at listing. Share exchange: a listed company was replaced under a scheme. Merger: companies combined and the result was listed. Not stated: the first listing does not say which. Later share sales do not count." />
+              </label>
+              <div className="timeframeBar" style={{ flexWrap: 'wrap' }}>
+                <button type="button" className={filterListing === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('all'); focusSection(browseRef); }}>All</button>
+                <button type="button" className={filterListing === 'introduction' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('introduction'); focusSection(browseRef); }}>Introduction</button>
+                <button type="button" className={filterListing === 'ipo' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('ipo'); focusSection(browseRef); }}>IPO</button>
+                <button type="button" className={filterListing === 'scheme' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('scheme'); focusSection(browseRef); }}>Share exchange</button>
+                <button type="button" className={filterListing === 'merger' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('merger'); focusSection(browseRef); }}>Merger</button>
+                <button type="button" className={filterListing === 'unknown' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterListing('unknown'); focusSection(browseRef); }}>Not stated</button>
+              </div>
+            </div>
+
+            <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Sector</label>
               <div className="timeframeBar" style={{ flexWrap: 'wrap' }}>
-                <button type="button" className={filterSector === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterSector('all')}>All</button>
+                <button type="button" className={filterSector === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterSector('all'); focusSection(browseRef); }}>All</button>
                 {sectorList.map((sec) => (
-                  <button key={sec} type="button" className={filterSector === sec ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterSector(sec)}>
+                  <button key={sec} type="button" className={filterSector === sec ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterSector(sec); focusSection(browseRef); }}>
                     {sec}
                   </button>
                 ))}
@@ -1250,21 +1597,21 @@ export function NgxPage() {
             <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Market Cap</label>
               <div className="timeframeBar">
-                <button type="button" className={filterCap === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterCap('all')}>All</button>
-                <button type="button" className={filterCap === 'large' ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterCap('large')}>Large (₦1T+)</button>
-                <button type="button" className={filterCap === 'mid' ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterCap('mid')}>Mid (₦100B–1T)</button>
-                <button type="button" className={filterCap === 'small' ? 'tfBtn active' : 'tfBtn'} onClick={() => setFilterCap('small')}>Small (&lt;₦100B)</button>
+                <button type="button" className={filterCap === 'all' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterCap('all'); focusSection(browseRef); }}>All</button>
+                <button type="button" className={filterCap === 'large' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterCap('large'); focusSection(browseRef); }}>Large (₦1T+)</button>
+                <button type="button" className={filterCap === 'mid' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterCap('mid'); focusSection(browseRef); }}>Mid (₦100B–1T)</button>
+                <button type="button" className={filterCap === 'small' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setFilterCap('small'); focusSection(browseRef); }}>Small (&lt;₦100B)</button>
               </div>
             </div>
 
             <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Sort by</label>
               <div className="timeframeBar">
-                <button type="button" className={sortBy === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setSortBy('market_cap')}>Market Cap</button>
-                <button type="button" className={sortBy === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => setSortBy('price')}>Price</button>
-                <button type="button" className={sortBy === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => setSortBy('change')}>Change</button>
-                <button type="button" className={sortBy === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => setSortBy('volume')}>Volume</button>
-                <button type="button" className={sortBy === 'symbol' ? 'tfBtn active' : 'tfBtn'} onClick={() => setSortBy('symbol')}>A–Z</button>
+                <button type="button" className={sortBy === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setSortBy('market_cap'); focusSection(browseRef); }}>Market Cap</button>
+                <button type="button" className={sortBy === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setSortBy('price'); focusSection(browseRef); }}>Price</button>
+                <button type="button" className={sortBy === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setSortBy('change'); focusSection(browseRef); }}>Change</button>
+                <button type="button" className={sortBy === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setSortBy('volume'); focusSection(browseRef); }}>Volume</button>
+                <button type="button" className={sortBy === 'symbol' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setSortBy('symbol'); focusSection(browseRef); }}>A–Z</button>
               </div>
             </div>
           </div>
@@ -1272,7 +1619,7 @@ export function NgxPage() {
           <div className="ngxTable">
             <table>
               <thead>
-                <tr><th>Symbol</th><th>Name</th><th>Price (₦)</th><th>Prev Close</th><th>Change</th><th>7d</th><th>Volume</th><th>Market Cap</th><th>Sector</th></tr>
+                <tr><th>Symbol</th><th>Name</th><th>How listed</th><th>Selling</th><th>Price (₦)</th><th>Prev Close</th><th>Change</th><th>7d</th><th>Volume</th><th>Market Cap</th><th>Sector</th></tr>
               </thead>
               <tbody>
                 {filteredStocks.map((s) => {
@@ -1280,6 +1627,7 @@ export function NgxPage() {
                   const up = chg >= 0;
                   const chg7d = s.pct_change_7d;
                   const up7d = (chg7d || 0) >= 0;
+                  const reading = liquidityBySymbol.get(s.symbol);
                   return (
                     <tr
                       key={s.symbol}
@@ -1292,6 +1640,12 @@ export function NgxPage() {
                     >
                       <td className="monoNum" style={{ fontWeight: 700 }}>{s.symbol}</td>
                       <td>{s.name}</td>
+                      <td><ListingTag stock={s} /></td>
+                      <td>
+                        {reading?.tone && reading.tone !== 'unknown' ? (
+                          <span className={`tag liquidityTag liquidityTag--${reading.tone}`}>{reading.label}</span>
+                        ) : '—'}
+                      </td>
                       <td className="monoNum">{formatNgn(s.current_price || 0)}</td>
                       <td className="monoNum">{s.previous_close != null ? formatNgn(s.previous_close) : '—'}</td>
                       <td>{chg !== 0 ? <span className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {up ? '+' : ''}{chg.toFixed(2)}%</span> : <span className="monoNum" style={{ color: '#8a9bb5' }}>0.00%</span>}</td>
@@ -1303,7 +1657,7 @@ export function NgxPage() {
                   );
                 })}
                 {filteredStocks.length === 0 && (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', color: '#8a9bb5', padding: '1.5rem' }}>No stocks match your filters</td></tr>
+                  <tr><td colSpan={11} style={{ textAlign: 'center', color: '#8a9bb5', padding: '1.5rem' }}>No stocks match your filters</td></tr>
                 )}
               </tbody>
             </table>

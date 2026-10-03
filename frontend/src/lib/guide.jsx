@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { GUIDE_SEEN_KEY, TOUR_STEPS } from './guideContent';
+import { INTRO_DONE_EVENT } from '../components/WelcomeSplash';
 
 const GuideContext = createContext(null);
 
@@ -30,8 +31,17 @@ export function GuideProvider({ children }) {
 
   useEffect(() => {
     if (readSeen()) return undefined;
-    const id = window.setTimeout(() => setInviteOpen(true), 900);
-    return () => window.clearTimeout(id);
+    const show = () => setInviteOpen(true);
+    const fallback = window.setTimeout(show, 4200);
+    const onIntro = () => {
+      window.clearTimeout(fallback);
+      window.setTimeout(show, 280);
+    };
+    window.addEventListener(INTRO_DONE_EVENT, onIntro);
+    return () => {
+      window.clearTimeout(fallback);
+      window.removeEventListener(INTRO_DONE_EVENT, onIntro);
+    };
   }, []);
 
   const closeInvite = useCallback((remember = true) => {

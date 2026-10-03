@@ -3,6 +3,7 @@ import axios from 'axios';
 import { buildDataProvenance, fetchCryptoSeriesWithFallback, geckoIdFromYahooCryptoSymbol } from '../services/marketData.js';
 import { fetchMergedNews } from '../services/news.js';
 import { enrichIndicators, normalizeCryptoSeries } from '../utils/normalize.js';
+import { parseOutlookYears, projectOutlook } from '../utils/forecast.js';
 
 export const cryptoRouter = Router();
 
@@ -374,6 +375,57 @@ cryptoRouter.get('/news/:id', async (req, res) => {
     res.json({ id, news });
   } catch {
     res.json({ id: req.params.id, news: [], error: 'Unable to load crypto news' });
+  }
+});
+
+cryptoRouter.get('/:id/outlook', async (req, res) => {
+  const id = String(req.params.id || '').trim().toLowerCase();
+  if (!/^[a-z0-9-]{2,40}$/.test(id)) {
+    return res.status(400).json({ error: 'id must be a coin identifier.', code: 'INVALID_SYMBOL' });
+  }
+  const years = parseOutlookYears(req.query.years ?? 3);
+  if (years == null) {
+    return res.status(400).json({ error: 'years must be 1, 2, 3, or 5.', code: 'INVALID_HORIZON' });
+  }
+  const ticker = String(req.query.symbol || '').trim().slice(0, 12);
+
+  const cacheKey = `outlook:${id}:${ticker}:${years}`;
+  const cached = RESP_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.ts < RESP_TTL) {
+    return res.json(cached.body);
+  }
+
+  try {
+    const { raw, metadata } = await fetchCryptoSeriesWithFallback(id, 3650, {
+      symbol: ticker,
+      preferYahoo: true,
+    });
+    const { series, currency } = normalizeCryptoSeries(raw, id);
+    const geckoOnly = metadata?.fallbackReason === 'yahoo-unavailable-gecko-365';
+    const projected = projectOutlook(series, {
+      horizonYears: years,
+      periodsPerYear: 365,
+      minBars: geckoOnly ? 300 : 365,
+    });
+    if (!projected.ok) {
+      const status = projected.code === 'INSUFFICIENT_HISTORY' ? 422 : 400;
+      return res.status(status).json({ ...projected, error: projected.reason });
+    }
+    const body = {
+      ...projected,
+      id,
+      currency: currency || 'USD',
+      provider: metadata?.provider || 'yahoo-finance',
+      sampleLimited: geckoOnly,
+    };
+    RESP_CACHE.set(cacheKey, { body, ts: Date.now() });
+    return res.json(body);
+  } catch (error) {
+    const status = error?.response?.status === 429 ? 429 : 502;
+    return res.status(status).json({
+      error: `Outlook history is unavailable for ${id}.`,
+      code: 'HISTORY_UNAVAILABLE',
+    });
   }
 });
 

@@ -1,9 +1,10 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { LogoMark } from './components/LogoMark';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ForexBar } from './components/ForexBar';
 import { AuthModal } from './components/AuthModal';
+import { WelcomeSplash } from './components/WelcomeSplash';
 import { applyTheme, readStoredTheme } from './theme';
 import { useAuth } from './lib/auth';
 import { useGuide } from './lib/guide';
@@ -13,17 +14,20 @@ import './App.css';
 const loadStockPage = () => import('./pages/StockPage');
 const loadCryptoPage = () => import('./pages/CryptoPage');
 const loadNgxPage = () => import('./pages/NgxPage');
+const loadForecastPage = () => import('./pages/ForecastPage');
 const loadLearnPage = () => import('./pages/LearnPage');
 const pageLoaders = [
   loadStockPage,
   loadCryptoPage,
   loadNgxPage,
+  loadForecastPage,
   loadLearnPage,
 ];
 
 const StockPage = lazy(() => loadStockPage().then((module) => ({ default: module.StockPage })));
 const CryptoPage = lazy(() => loadCryptoPage().then((module) => ({ default: module.CryptoPage })));
 const NgxPage = lazy(() => loadNgxPage().then((module) => ({ default: module.NgxPage })));
+const ForecastPage = lazy(() => loadForecastPage().then((module) => ({ default: module.ForecastPage })));
 const LearnPage = lazy(() => loadLearnPage().then((module) => ({ default: module.LearnPage })));
 
 const NAV_ITEMS = [
@@ -31,6 +35,7 @@ const NAV_ITEMS = [
   { to: '/stocks', label: 'Stocks' },
   { to: '/crypto', label: 'Crypto' },
   { to: '/ngx', label: 'NGX' },
+  { to: '/forecast', label: 'Forecast' },
   { to: '/learn', label: 'Learn' },
 ];
 
@@ -223,7 +228,7 @@ function HomePage({ onOpenTrust }) {
             <header>
               <span>Open a market</span>
               <strong>Markets and reference</strong>
-              <small>Same chart</small>
+              <small>Chart or forecast</small>
             </header>
             <div className="welcomeGrid welcomeGrid--markets">
               <Link to="/stocks" className="welcomeOption welcomeOption--featured">
@@ -243,6 +248,12 @@ function HomePage({ onOpenTrust }) {
                 <strong>Nigerian Exchange</strong>
                 <span>NGX quotes in naira. History only when NGX Pulse returns it.</span>
                 <span className="welcomeArrow">Open NGX <b aria-hidden="true">↗</b></span>
+              </Link>
+              <Link to="/forecast" className="welcomeOption">
+                <span className="welcomeIcon">FC</span>
+                <strong>Forecast</strong>
+                <span>Possible performance for a US stock, NGX listing, or coin over 1, 2, 3, or 5 years — a range, not a promised price.</span>
+                <span className="welcomeArrow">Open Forecast <b aria-hidden="true">↗</b></span>
               </Link>
               <Link to="/learn" className="welcomeOption">
                 <span className="welcomeIcon">RF</span>
@@ -338,10 +349,12 @@ function TrustCenterModal({ open, onClose }) {
 
 function App() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isSignedIn, user, status, accountsEnabled, openAuth, logout } = useAuth();
   const { startTour } = useGuide();
   const [trustOpen, setTrustOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const boardNonce = useRef(0);
   const [theme, setTheme] = useState(() => (
     typeof document !== 'undefined' ? (document.documentElement.dataset.theme || readStoredTheme()) : 'light'
   ));
@@ -353,6 +366,22 @@ function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const onPop = () => window.scrollTo(0, 0);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function openSection(event, item) {
+    setNavOpen(false);
+    if (location.pathname === item.to) {
+      event.preventDefault();
+      boardNonce.current += 1;
+      navigate({ pathname: item.to, search: '' }, { replace: true, state: { board: boardNonce.current } });
+    }
+    window.scrollTo(0, 0);
+  }
 
   useEffect(() => {
     const connection = navigator.connection;
@@ -368,6 +397,7 @@ function App() {
 
   return (
     <>
+      <WelcomeSplash />
       <a className="skipLink" href="#main-content">Skip to content</a>
       <TrustCenterModal open={trustOpen} onClose={closeTrust} />
       <AuthModal />
@@ -375,7 +405,7 @@ function App() {
       <header className="topNav">
           <div className="topNavInner">
             <div className="brandBlock">
-              <Link to="/" className="brandLink" aria-label="Nexora Markets home" onClick={() => setNavOpen(false)}>
+              <Link to="/" className="brandLink" aria-label="Nexora Markets home" onClick={() => { setNavOpen(false); window.scrollTo(0, 0); }}>
               <LogoMark compact />
             </Link>
             </div>
@@ -398,7 +428,7 @@ function App() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
-                    onClick={() => setNavOpen(false)}
+                    onClick={(event) => openSection(event, item)}
                     className={({ isActive }) => (isActive ? 'active' : '')}
                   >
                     {item.label}
@@ -470,6 +500,7 @@ function App() {
           <Route path="/stocks" element={<StockPage />} />
           <Route path="/crypto" element={<CryptoPage />} />
           <Route path="/ngx" element={<NgxPage />} />
+          <Route path="/forecast" element={<ForecastPage />} />
           <Route path="/learn" element={<LearnPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

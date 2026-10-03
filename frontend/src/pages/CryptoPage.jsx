@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, CartesianGrid, Cell, Legend, Line, LineChart,
   PieChart, Pie, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -8,6 +9,7 @@ import {
   fetchCryptoInfo,
   fetchCryptoMarkets,
   fetchCryptoNews,
+  fetchCryptoOutlook,
   fetchCryptoYahooOverviewQuotes,
   fetchFx,
   searchCrypto,
@@ -15,7 +17,11 @@ import {
 import { HelpHint } from '../components/HelpHint';
 import { ConditionBoard } from '../components/ConditionBoard';
 import { MarketChart } from '../components/MarketChart';
+import { OutlookPanel } from '../components/OutlookPanel';
+import { LiquidityFlag } from '../components/LiquidityFlag';
+import { LiquidityBoard } from '../components/LiquidityBoard';
 import { matchesSearch, searchRank } from '../lib/textSearch';
+import { assessLiquidity, scoreLiquidityBoard } from '../lib/liquidity';
 import {
   breadthFromChanges,
   conditionFromAvg,
@@ -211,6 +217,9 @@ function buildOverviewFromCryptoSeries(items) {
 }
 
 export function CryptoPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const urlAsset = useRef(null);
   const [asset, setAsset] = useState('');
   const [pickedTicker, setPickedTicker] = useState('');
   const [assetInput, setAssetInput] = useState('');
@@ -235,10 +244,24 @@ export function CryptoPage() {
   const [overviewError, setOverviewError] = useState('');
   const [overviewNote, setOverviewNote] = useState('');
   const [overviewRetryKey, setOverviewRetryKey] = useState(0);
+  const [outlookYears, setOutlookYears] = useState(3);
+  const [outlook, setOutlook] = useState(null);
+  const [outlookError, setOutlookError] = useState('');
+  const [outlookLoading, setOutlookLoading] = useState(false);
   const assetCacheRef = useRef(new Map());
   const overviewCacheRef = useRef(new Map());
   const searchRef = useRef(null);
   const selectedPanelRef = useRef(null);
+  const outlookRef = useRef(null);
+  const liquidityRef = useRef(null);
+  const browseRef = useRef(null);
+  const breadthRef = useRef(null);
+  const vizRef = useRef(null);
+  const conditionRef = useRef(null);
+  const [showLiquidity, setShowLiquidity] = useState(false);
+  const [fromLiquidity, setFromLiquidity] = useState(false);
+  const [liquidityListKey, setLiquidityListKey] = useState(0);
+  const scrollAfterClose = useRef(null);
 
   const tf = TIMEFRAMES.find((item) => item.id === timeframe) || TIMEFRAMES[1];
 
@@ -375,6 +398,61 @@ export function CryptoPage() {
   }, [asset, cryptoDays, assetTicker]);
 
   useEffect(() => {
+    const incomingId = String(searchParams.get('id') || '').trim().toLowerCase();
+    const incomingTicker = String(searchParams.get('symbol') || '').trim().toUpperCase();
+    if (urlAsset.current === incomingId) return;
+    const previous = urlAsset.current;
+    urlAsset.current = incomingId;
+    setAsset(incomingId);
+    setPickedTicker(incomingTicker);
+    setAssetInput(incomingTicker || incomingId);
+    if (!incomingId) {
+      setCoinInfo(null);
+      setSearchOpen(false);
+      if (previous && !scrollAfterClose.current) scrollAfterClose.current = browseRef;
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!location.state?.board) return;
+    setShowLiquidity(false);
+    setFromLiquidity(false);
+    setCryptoFilter('All');
+    urlAsset.current = '';
+    setAsset('');
+    setAssetInput('');
+    setPickedTicker('');
+    setCoinInfo(null);
+    setSearchOpen(false);
+  }, [location.state]);
+
+  useEffect(() => {
+    if (!asset) {
+      setOutlook(null);
+      setOutlookError('');
+      setOutlookLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setOutlook(null);
+    setOutlookLoading(true);
+    setOutlookError('');
+    fetchCryptoOutlook(asset, outlookYears, { symbol: assetTicker })
+      .then((data) => {
+        if (cancelled) return;
+        setOutlook(data);
+        setOutlookLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setOutlook(null);
+        setOutlookError(err.message || 'Outlook unavailable');
+        setOutlookLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [asset, outlookYears, assetTicker]);
+
+  useEffect(() => {
     if (!asset) return;
     setCoinInfo(null);
     fetchCryptoInfo(asset).then((info) => { if (info && !info.error) setCoinInfo(info); }).catch(() => {});
@@ -406,6 +484,17 @@ export function CryptoPage() {
     selectedPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [asset]);
 
+  useEffect(() => {
+    if (asset) return undefined;
+    const target = scrollAfterClose.current;
+    if (!target) return undefined;
+    const timer = window.setTimeout(() => {
+      scrollAfterClose.current = null;
+      target.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [asset, showLiquidity]);
+
   const displaySeries = useMemo(() => {
     if (!showNgn || !Number.isFinite(fxRate)) return series;
     const keys = ['open', 'high', 'low', 'close', 'ma7', 'sma20', 'ema20', 'bb_upper', 'bb_middle', 'bb_lower', 'macd', 'macd_signal', 'macd_hist'];
@@ -432,6 +521,76 @@ export function CryptoPage() {
     [coinInfo, cryptoNews],
   );
   const topHeadlineLabel = asset ? (coinInfo?.name || asset) : 'crypto market';
+
+  const liquidityBoardAll = useMemo(() => scoreLiquidityBoard(
+    allCoins.map((coin) => ({
+      venue: 'crypto',
+      id: coin.id,
+      symbol: coin.symbol,
+      name: coin.name,
+      sector: getCoinCategory(coin.id),
+      valueTraded: coin.volume24h,
+      volume: coin.volume24h,
+      price: coin.price,
+      marketCap: coin.marketCap,
+    })),
+    'crypto',
+  ), [allCoins]);
+
+  const liquidityById = useMemo(() => {
+    const map = new Map();
+    liquidityBoardAll.forEach((row) => {
+      if (row.id) map.set(row.id, row);
+    });
+    return map;
+  }, [liquidityBoardAll]);
+
+  const liquidityReading = useMemo(() => {
+    if (!asset) return null;
+    const dollarVolume = coinInfo?.totalVolume ?? selectedSnapshot?.volume24h;
+    return assessLiquidity({
+      venue: 'crypto',
+      id: asset,
+      symbol: assetTicker || selectedSnapshot?.symbol,
+      valueTraded: dollarVolume,
+      volume: dollarVolume,
+      price: selectedSnapshot?.price ?? latestUsd,
+      marketCap: coinInfo?.marketCap ?? selectedSnapshot?.marketCap,
+    }, {
+      venue: 'crypto',
+      peerTurnovers: liquidityBoardAll.map((row) => row.turnover),
+      peerCaps: liquidityBoardAll.map((row) => row.marketCap),
+    });
+  }, [asset, assetTicker, coinInfo, selectedSnapshot, latestUsd, liquidityBoardAll]);
+
+  function clearAssetParam() {
+    const params = new URLSearchParams(searchParams);
+    if (!params.get('id') && !params.get('symbol')) return;
+    params.delete('id');
+    params.delete('symbol');
+    setSearchParams(params, { replace: true });
+  }
+
+  function openLiquidity() {
+    setCryptoFilter('All');
+    setShowLiquidity(true);
+    setLiquidityListKey((key) => key + 1);
+    setFromLiquidity(false);
+    setSearchOpen(false);
+    scrollAfterClose.current = liquidityRef;
+    if (asset) {
+      urlAsset.current = '';
+      setAsset('');
+      setAssetInput('');
+      setCoinInfo(null);
+      setPickedTicker('');
+      clearAssetParam();
+      return;
+    }
+    window.setTimeout(() => {
+      liquidityRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  }
 
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -569,12 +728,73 @@ export function CryptoPage() {
 
   const showDropdown = searchOpen && assetInput.trim().length > 0;
 
-  function pickAsset(id, label = id, ticker = '') {
+  function pickAsset(id, label = id, ticker = '', source = '') {
+    const nextId = String(id || '').trim().toLowerCase();
+    if (!nextId) return;
+    const nextTicker = String(ticker || '').toUpperCase();
+    setFromLiquidity(source === 'liquidity');
+    urlAsset.current = nextId;
     setAssetInput(label);
-    setAsset(id);
-    setPickedTicker(String(ticker || '').toUpperCase());
+    setAsset(nextId);
+    setPickedTicker(nextTicker);
     setSearchOpen(false);
     setSearchResults([]);
+    const params = new URLSearchParams(searchParams);
+    if (params.get('id') === nextId && String(params.get('symbol') || '').toUpperCase() === nextTicker) return;
+    params.set('id', nextId);
+    if (nextTicker) params.set('symbol', nextTicker);
+    else params.delete('symbol');
+    setSearchParams(params);
+  }
+
+  function closeAsset() {
+    scrollAfterClose.current = fromLiquidity ? liquidityRef : browseRef;
+    if (fromLiquidity) setShowLiquidity(true);
+    setFromLiquidity(false);
+    urlAsset.current = '';
+    setAsset('');
+    setAssetInput('');
+    setCoinInfo(null);
+    setPickedTicker('');
+    setSearchOpen(false);
+    clearAssetParam();
+  }
+
+  function focusSection(ref) {
+    window.requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function chooseTimeframe(id) {
+    setTimeframe(id);
+    focusSection(asset ? selectedPanelRef : conditionRef);
+  }
+
+  function leaveOpenName(ref) {
+    scrollAfterClose.current = ref;
+    if (!asset) {
+      focusSection(ref);
+      return;
+    }
+    urlAsset.current = '';
+    setFromLiquidity(false);
+    setAsset('');
+    setAssetInput('');
+    setCoinInfo(null);
+    setPickedTicker('');
+    setSearchOpen(false);
+    clearAssetParam();
+  }
+
+  function chooseBreadth(view) {
+    setBreadthView(view);
+    leaveOpenName(breadthRef);
+  }
+
+  function chooseViz(tab) {
+    setVizTab(tab);
+    leaveOpenName(vizRef);
   }
 
   function handleSearchKey(e) {
@@ -620,6 +840,13 @@ export function CryptoPage() {
               label="What does the naira toggle do?"
               text="Shows the same US-dollar prices converted with a live USD to NGN rate. The original data is still in dollars."
             />
+            <button
+              type="button"
+              className={showLiquidity && !asset ? 'liquidityBtn isActive' : 'liquidityBtn'}
+              onClick={openLiquidity}
+            >
+              Liquidity
+            </button>
           </div>
         </div>
 
@@ -634,7 +861,7 @@ export function CryptoPage() {
               placeholder="Search any crypto globally — name, ticker, or coin ID..."
             />
             {assetInput && (
-              <button type="button" className="searchClear" onClick={() => { setAssetInput(''); setSearchOpen(false); }}>✕</button>
+              <button type="button" className="searchClear" onClick={closeAsset}>✕</button>
             )}
             {showDropdown && (
               <ul className="suggestionList">
@@ -685,7 +912,7 @@ export function CryptoPage() {
 
           <div className="timeframeBar">
             {TIMEFRAMES.map((item) => (
-              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={item.id} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -729,7 +956,7 @@ export function CryptoPage() {
         )}
       </section>
 
-      <section className="panel conditionPanel">
+      <section className="panel conditionPanel" ref={conditionRef}>
         <ConditionBoard
           hint="A sample of tracked coins (BTC, ETH, SOL, XRP and four others). Bullish means most of those closed higher. It is not the whole crypto market."
           rangeLabel={overview.snapshotFallback ? 'Today’s quotes' : tf.label}
@@ -782,7 +1009,7 @@ export function CryptoPage() {
       </section>
 
       {catChartData.length > 0 && (
-        <section className="panel">
+        <section className="panel" ref={breadthRef}>
           <div className="sectionHead">
             <h3>Category Performance & Breadth</h3>
             <span className="tag muted">Daily quote changes</span>
@@ -815,11 +1042,11 @@ export function CryptoPage() {
                 </ResponsiveContainer>
               </div>
               <div className="breadthQuickGrid">
-                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => setBreadthView('advancing')}><div className="breadthQuickLabel">Advancing</div><div className="monoNum breadthQuickValue">{cryptoBreadth[0].value}</div></button>
-                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => setBreadthView('declining')}><div className="breadthQuickLabel">Declining</div><div className="monoNum breadthQuickValue">{cryptoBreadth[1].value}</div></button>
-                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => setBreadthView('unchanged')}><div className="breadthQuickLabel">Unchanged</div><div className="monoNum breadthQuickValue">{cryptoBreadth[2].value}</div></button>
+                <button type="button" className={breadthView === 'advancing' ? 'breadthQuickCard breadthQuickCard--up active' : 'breadthQuickCard breadthQuickCard--up'} onClick={() => chooseBreadth('advancing')}><div className="breadthQuickLabel">Advancing</div><div className="monoNum breadthQuickValue">{cryptoBreadth[0].value}</div></button>
+                <button type="button" className={breadthView === 'declining' ? 'breadthQuickCard breadthQuickCard--down active' : 'breadthQuickCard breadthQuickCard--down'} onClick={() => chooseBreadth('declining')}><div className="breadthQuickLabel">Declining</div><div className="monoNum breadthQuickValue">{cryptoBreadth[1].value}</div></button>
+                <button type="button" className={breadthView === 'unchanged' ? 'breadthQuickCard breadthQuickCard--flat active' : 'breadthQuickCard breadthQuickCard--flat'} onClick={() => chooseBreadth('unchanged')}><div className="breadthQuickLabel">Unchanged</div><div className="monoNum breadthQuickValue">{cryptoBreadth[2].value}</div></button>
               </div>
-              <button type="button" className="breadthShowAll" onClick={() => setBreadthView('all')}>Show all</button>
+              <button type="button" className="breadthShowAll" onClick={() => chooseBreadth('all')}>Show all</button>
             </div>
           </div>
           <div className="ngxTable" style={{ marginTop: '0.8rem', maxHeight: 260, overflowY: 'auto' }}>
@@ -874,13 +1101,13 @@ export function CryptoPage() {
       </section>
 
       {allCoins.length > 0 && (
-        <section className="panel">
+        <section className="panel" ref={vizRef}>
           <div className="sectionHead">
             <h3>Visualizer</h3>
             <div className="timeframeBar">
-              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('performance')}>Performance</button>
-              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('marketcap')}>Market Cap</button>
-              <button type="button" className={vizTab === 'categories' ? 'tfBtn active' : 'tfBtn'} onClick={() => setVizTab('categories')}>Categories</button>
+              <button type="button" className={vizTab === 'performance' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('performance')}>Performance</button>
+              <button type="button" className={vizTab === 'marketcap' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('marketcap')}>Market Cap</button>
+              <button type="button" className={vizTab === 'categories' ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseViz('categories')}>Categories</button>
             </div>
           </div>
           {vizTab === 'performance' && (
@@ -951,8 +1178,33 @@ export function CryptoPage() {
               {displaySeries.length >= 2 ? (
                 <span className={`pctBadge ${change.isPositive ? 'up' : 'down'}`}>{change.isPositive ? '▲' : '▼'} {change.isPositive ? '+' : ''}{change.pct.toFixed(2)}%</span>
               ) : <span className="tag muted">Current snapshot</span>}
-              <button type="button" className="expandBtn" onClick={() => { setAsset(''); setCoinInfo(null); setPickedTicker(''); }}>← Back</button>
+              {liquidityReading?.tone && liquidityReading.tone !== 'unknown' && (
+                <span className={`tag liquidityTag liquidityTag--${liquidityReading.tone}`}>{liquidityReading.label}</span>
+              )}
+              <button type="button" className={fromLiquidity ? 'liquidityBack' : 'expandBtn'} onClick={closeAsset}>
+                {fromLiquidity ? '← Back to liquidity' : '← Back'}
+              </button>
             </div>
+          </div>
+          <div className="stockHeroActionRow">
+            <button
+              type="button"
+              className="actionGhost"
+              onClick={() => {
+                window.requestAnimationFrame(() => {
+                  outlookRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+              }}
+            >
+              Forecast this coin
+            </button>
+            <button
+              type="button"
+              className="liquidityBtn"
+              onClick={openLiquidity}
+            >
+              Liquidity
+            </button>
           </div>
           <div className="sectionHead" style={{ marginTop: '0.5rem' }}>
             <div>
@@ -962,7 +1214,7 @@ export function CryptoPage() {
           </div>
           <div className="timeframeBar">
             {TIMEFRAMES.map((item) => (
-              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => setTimeframe(item.id)}>
+              <button key={`detail-${item.id}`} type="button" className={item.id === timeframe ? 'tfBtn active' : 'tfBtn'} onClick={() => chooseTimeframe(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -981,6 +1233,25 @@ export function CryptoPage() {
               <p>The price below is a live snapshot. The chart stays empty until CoinGecko or Yahoo returns history for this coin.</p>
             </div>
           )}
+          <div className="tickerOutlook" ref={outlookRef}>
+            <OutlookPanel
+              title={`${(assetTicker || asset).toUpperCase()} over the next ${outlookYears} year${outlookYears === 1 ? '' : 's'}`}
+              hint="Weaker, typical, and stronger are three pictures from this coin’s own daily prices. The year buttons are how long you might hold it. Forecast in the top menu is the same picture for any coin."
+              years={outlookYears}
+              onYears={setOutlookYears}
+              data={outlook ? { ...outlook, fxScale: showNgn && Number.isFinite(fxRate) ? fxRate : 1 } : null}
+              error={outlookError}
+              loading={outlookLoading}
+              formatPrice={(n) => formatMoney(n, unit)}
+            />
+            <p className="subtle outlookPageLink">
+              <Link to={`/forecast?market=crypto&id=${encodeURIComponent(asset)}${assetTicker ? `&symbol=${encodeURIComponent(assetTicker)}` : ''}&years=${outlookYears}`}>Open this range on Forecast</Link>
+              {' '}to pick another coin without leaving the forecast tool.
+            </p>
+          </div>
+          <div className="tickerOutlook">
+            <LiquidityFlag reading={liquidityReading} name={(assetTicker || asset).toUpperCase()} />
+          </div>
           {error && <p className="warn">{error}</p>}
 
           {selectedCatPeers.length > 1 && (
@@ -1063,8 +1334,25 @@ export function CryptoPage() {
       </section>
 
 
+      {!asset && showLiquidity && (
+        <section className="panel" ref={liquidityRef}>
+          <div className="sectionHead">
+            <div>
+              <h3>Liquidity</h3>
+              <p className="subtle">Red means a normal $1,000 sale would be a big part of the last 24 hours of trading. Open a row to see that in plain words.</p>
+            </div>
+            <button type="button" className="expandBtn" onClick={() => setShowLiquidity(false)}>Close</button>
+          </div>
+          <LiquidityBoard
+            listKey={liquidityListKey}
+            rows={liquidityBoardAll}
+            onPick={(row) => pickAsset(row.id || row.symbol, row.name, row.symbol, 'liquidity')}
+          />
+        </section>
+      )}
+
       {!asset && (
-        <section className="panel">
+        <section className="panel" ref={browseRef}>
           <div className="sectionHead">
             <h3>Browse by Category</h3>
             <span className="tag muted">{allCoins.filter((c) => cryptoFilter === 'All' || getCoinCategory(c.id) === cryptoFilter).length} coins in view</span>
@@ -1075,23 +1363,23 @@ export function CryptoPage() {
                 Category <HelpHint text="Filter the coin list by type, such as Layer 1 or meme coins. This is a simple grouping, not investment advice." />
               </label>
               <div className="timeframeBar" style={{ flexWrap: 'wrap' }}>{CRYPTO_CATEGORIES.map((cat) => (
-                <button key={cat} type="button" className={cryptoFilter === cat ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoFilter(cat)}>{cat}</button>
+                <button key={cat} type="button" className={cryptoFilter === cat ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoFilter(cat); focusSection(browseRef); }}>{cat}</button>
               ))}</div>
             </div>
             <div className="ngxFilterGroup">
               <label className="ngxFilterLabel">Sort by</label>
               <div className="timeframeBar">
-                <button type="button" className={cryptoSort === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoSort('market_cap')}>Market Cap</button>
-                <button type="button" className={cryptoSort === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoSort('volume')}>24h Volume</button>
-                <button type="button" className={cryptoSort === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoSort('change')}>24h Change</button>
-                <button type="button" className={cryptoSort === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoSort('price')}>Price</button>
-                <button type="button" className={cryptoSort === 'name' ? 'tfBtn active' : 'tfBtn'} onClick={() => setCryptoSort('name')}>A-Z</button>
+                <button type="button" className={cryptoSort === 'market_cap' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoSort('market_cap'); focusSection(browseRef); }}>Market Cap</button>
+                <button type="button" className={cryptoSort === 'volume' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoSort('volume'); focusSection(browseRef); }}>24h Volume</button>
+                <button type="button" className={cryptoSort === 'change' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoSort('change'); focusSection(browseRef); }}>24h Change</button>
+                <button type="button" className={cryptoSort === 'price' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoSort('price'); focusSection(browseRef); }}>Price</button>
+                <button type="button" className={cryptoSort === 'name' ? 'tfBtn active' : 'tfBtn'} onClick={() => { setCryptoSort('name'); focusSection(browseRef); }}>A-Z</button>
               </div>
             </div>
           </div>
           <div className="ngxTable">
             <table>
-              <thead><tr><th>#</th><th>Coin</th><th>Price</th><th>24h</th><th>7d</th><th>Volume</th><th>Market Cap</th><th>Category</th></tr></thead>
+              <thead><tr><th>#</th><th>Coin</th><th>Selling</th><th>Price</th><th>24h</th><th>7d</th><th>Volume</th><th>Market Cap</th><th>Category</th></tr></thead>
               <tbody>
                 {allCoins
                   .filter((c) => cryptoFilter === 'All' || getCoinCategory(c.id) === cryptoFilter)
@@ -1105,6 +1393,7 @@ export function CryptoPage() {
                   .map((c) => {
                     const up = (c.change24h || 0) >= 0;
                     const up7d = (c.change7d || 0) >= 0;
+                    const reading = liquidityById.get(c.id);
                     return (
                       <tr
                         key={c.id}
@@ -1117,6 +1406,11 @@ export function CryptoPage() {
                       >
                         <td className="monoNum">{c.rank || '—'}</td>
                         <td style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>{c.image && <img src={c.image} alt="" style={{ width: 20, height: 20, borderRadius: 999 }} />}<div><span style={{ fontWeight: 700 }}>{c.symbol}</span><span className="sugName" style={{ display: 'block' }}>{c.name}</span></div></td>
+                        <td>
+                          {reading?.tone && reading.tone !== 'unknown' ? (
+                            <span className={`tag liquidityTag liquidityTag--${reading.tone}`}>{reading.label}</span>
+                          ) : '—'}
+                        </td>
                         <td className="monoNum">${c.price?.toLocaleString(undefined, { maximumFractionDigits: c.price >= 1 ? 2 : 6 })}</td>
                         <td><span className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {(c.change24h || 0).toFixed(1)}%</span></td>
                         <td>{c.change7d != null ? <span className={`pctBadge ${up7d ? 'up' : 'down'}`}>{up7d ? '▲' : '▼'} {(c.change7d || 0).toFixed(1)}%</span> : '—'}</td>
@@ -1135,7 +1429,7 @@ export function CryptoPage() {
       {!asset && (
         <section className="panel emptyState">
           <h3>Select a coin to visualize</h3>
-          <p>Search for any cryptocurrency above, click a top mover, or browse by category. You&apos;ll see price charts with tested indicators when history is available.</p>
+          <p>Search for any cryptocurrency above, click a top mover, or browse by category. You&apos;ll see a price chart, tested indicators when history is available, and this coin’s possible-performance range. Forecast is also its own button in the top menu.</p>
         </section>
       )}
     </main>
