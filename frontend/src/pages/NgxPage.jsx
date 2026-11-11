@@ -27,9 +27,14 @@ import {
   seriesReturn,
   sessionChange,
 } from '../lib/marketMath';
+import { formatDateTick } from '../lib/chartFormat';
 
 function formatNgn(value) {
   return `₦${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatNgnOrDash(value) {
+  return value != null && Number.isFinite(Number(value)) ? formatNgn(value) : '—';
 }
 
 function formatCap(value) {
@@ -627,11 +632,12 @@ export function NgxPage() {
 
   const topMovers = useMemo(() => {
     if (listedCondition.breadthFromHistory) {
+      const bySymbol = new Map(allStocks.map((s) => [s.symbol, s]));
       return rangeBreadth.rows
         .filter((row) => row.change != null)
         .sort((a, b) => Math.abs(b.change) - Math.abs(a.change))
         .slice(0, 8)
-        .map((row) => ({ symbol: row.symbol, _chg: row.change }));
+        .map((row) => ({ ...bySymbol.get(row.symbol), symbol: row.symbol, _chg: row.change }));
     }
     return allStocks
       .map((s) => ({ ...s, _chg: sessionChange(s) }))
@@ -696,7 +702,7 @@ export function NgxPage() {
       symbol: s.symbol,
       name: s.name,
       sector: s.sector || '—',
-      price: s.current_price || 0,
+      price: s.current_price ?? null,
       changePct: sessionChange(s),
       raw: s,
     }));
@@ -763,7 +769,7 @@ export function NgxPage() {
       .slice(0, 10)
       .map((s) => ({
         symbol: s.symbol,
-        price: s.current_price || 0,
+        price: s.current_price ?? null,
         change: +stockChange(s).toFixed(2),
         capLabel: formatCap(s.market_cap),
         isCurrent: s.symbol === selected.symbol,
@@ -1028,7 +1034,7 @@ export function NgxPage() {
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={compositeIndex}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" minTickGap={24} />
+                <XAxis dataKey="date" minTickGap={24} tickFormatter={formatDateTick} />
                 <YAxis domain={['auto', 'auto']} />
                 <Tooltip />
                 <Line type="monotone" dataKey="marketIndex" stroke="#2563eb" dot={false} strokeWidth={2} name="NGX Composite" />
@@ -1116,7 +1122,7 @@ export function NgxPage() {
                       <td className="monoNum" style={{ fontWeight: 700 }}>{r.symbol}</td>
                       <td>{r.name}</td>
                       <td>{r.sector}</td>
-                      <td className="monoNum">{formatNgn(r.price)}</td>
+                      <td className="monoNum">{formatNgnOrDash(r.price)}</td>
                       <td>
                         {Number.isFinite(r.changePct) ? (
                           <span className={`pctBadge ${up ? 'up' : down ? 'down' : ''}`}>
@@ -1147,7 +1153,7 @@ export function NgxPage() {
               return (
                 <button key={s.symbol} className={`moverCard ${up ? 'cardUp' : 'cardDown'}`} type="button" onClick={() => pickStock(s)}>
                   <span>{s.symbol}</span>
-                  <span className="moverPrice">{formatNgn(s.current_price || 0)}</span>
+                  <span className="moverPrice">{formatNgnOrDash(s.current_price)}</span>
                   <strong className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {up ? '+' : ''}{chg.toFixed(2)}%</strong>
                 </button>
               );
@@ -1162,7 +1168,7 @@ export function NgxPage() {
           <div className="sectionHead">
             <h3>{selected.symbol}</h3>
             <div className="vizPriceRow">
-              <span className={`priceTag ${selectedChange.isPositive ? 'up' : 'down'}`}>{formatNgn(selected.current_price || 0)}</span>
+              <span className={`priceTag ${selectedChange.isPositive ? 'up' : 'down'}`}>{formatNgnOrDash(selected.current_price)}</span>
               {selectedSeries.length >= 2 ? (
                 <span className={`pctBadge ${selectedChange.isPositive ? 'up' : 'down'}`}>
                   {selectedChange.isPositive ? '▲' : '▼'} {selectedChange.isPositive ? '+' : ''}{selectedChange.pct.toFixed(2)}%
@@ -1423,7 +1429,7 @@ export function NgxPage() {
                       if (full) pickStock(full);
                     }}>
                       <span>{p.symbol}</span>
-                      <span className="moverPrice">{formatNgn(p.price)}</span>
+                      <span className="moverPrice">{formatNgnOrDash(p.price)}</span>
                       <strong className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {up ? '+' : ''}{p.change.toFixed(2)}%</strong>
                     </button>
                   );
@@ -1646,7 +1652,7 @@ export function NgxPage() {
                           <span className={`tag liquidityTag liquidityTag--${reading.tone}`}>{reading.label}</span>
                         ) : '—'}
                       </td>
-                      <td className="monoNum">{formatNgn(s.current_price || 0)}</td>
+                      <td className="monoNum">{formatNgnOrDash(s.current_price)}</td>
                       <td className="monoNum">{s.previous_close != null ? formatNgn(s.previous_close) : '—'}</td>
                       <td>{chg !== 0 ? <span className={`pctBadge ${up ? 'up' : 'down'}`}>{up ? '▲' : '▼'} {up ? '+' : ''}{chg.toFixed(2)}%</span> : <span className="monoNum" style={{ color: '#8a9bb5' }}>0.00%</span>}</td>
                       <td>{chg7d != null && chg7d !== 0 ? <span className={`pctBadge ${up7d ? 'up' : 'down'}`}>{up7d ? '▲' : '▼'} {up7d ? '+' : ''}{chg7d.toFixed(2)}%</span> : <span className="monoNum" style={{ color: '#8a9bb5' }}>—</span>}</td>

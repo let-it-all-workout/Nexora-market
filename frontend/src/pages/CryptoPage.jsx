@@ -28,6 +28,7 @@ import {
   firstLastPct,
   rebaseAverageSeries,
 } from '../lib/marketMath';
+import { formatDateTick } from '../lib/chartFormat';
 
 const OVERVIEW_UNIVERSE = ['bitcoin', 'ethereum', 'solana', 'ripple', 'dogecoin', 'shiba-inu', 'pepe', 'bonk-1'];
 const OVERVIEW_LABELS = {
@@ -997,7 +998,7 @@ export function CryptoPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={overview.conditionSeries}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" minTickGap={24} />
+                  <XAxis dataKey="date" minTickGap={24} tickFormatter={formatDateTick} />
                   <YAxis />
                   <Tooltip />
                   <Line type="monotone" dataKey="marketIndex" stroke="#0ea5e9" dot={false} strokeWidth={2} name="Sample index (start = 100)" />

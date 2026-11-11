@@ -48,7 +48,7 @@ export function plausibleFloat(floatShares, sharesOutstanding) {
   const shares = num(sharesOutstanding);
   if (floatN == null || shares == null || shares <= 0 || floatN <= 0) return null;
   const ratio = floatN / shares;
-  if (ratio < 0.005 || ratio > 1.05) return null;
+  if (ratio < 0.05 || ratio > 1.05) return null;
   return floatN;
 }
 
@@ -226,194 +226,101 @@ function card(key, label, value, hint) {
   return { key, label, value, hint: hint || '' };
 }
 
-function reasonFromFlag(flag, marketOpen) {
-  if (!flag) return null;
-  switch (flag.code) {
-    case 'NO_PRINTS':
-      return 'No demand';
-    case 'HARD_TO_SELL':
-      return 'Very low demand';
-    case 'THIN_AVERAGE':
-      return flag.severity === 'amber' ? 'Low demand' : 'Very low demand';
-    case 'SLOW_TO_SELL':
-    case 'BELOW_PEERS':
-      return 'Low demand';
-    case 'TIGHT_FLOAT':
-    case 'NARROW_FLOAT':
-    case 'INSIDER_CONTROL':
-    case 'INSIDER_WEIGHT':
-      return 'Low free float';
-    case 'WIDE_SPREAD':
-      return 'Wide spread';
-    case 'SUSPENDED':
-      return 'Suspended';
-    case 'DELISTED':
-      return 'Delisted';
-    case 'CORPORATE_ACTION':
-      return 'Corporate action';
-    case 'QUIET_BOARD':
-      return marketOpen === false ? 'Market closed' : 'Not enough to tell';
-    default:
-      return null;
-  }
-}
+function sellFactors({ venue, metrics, typicalShare }) {
+  if (venue !== 'ngx' && venue !== 'us') return [];
+  const factors = [];
 
-function sellFactors({
-  venue,
-  metrics,
-  typicalShare,
-  saleShare,
-  reason,
-  marketOpen,
-  listingStatus,
-  corporateAction,
-  corporateActionNote,
-  tone,
-}) {
-  const demandTone = tone === 'unknown'
-    ? 'unknown'
-    : metrics.volume === 0 && saleShare == null
-    ? 'red'
-    : saleShare >= SALE_SHARE_RED || typicalShare >= SALE_SHARE_RED
-      ? 'red'
-      : saleShare >= SALE_SHARE_AMBER || typicalShare >= SALE_SHARE_AMBER
-        ? 'amber'
-        : (saleShare != null || metrics.valueTraded > 0)
-          ? 'ok'
-          : 'unknown';
-  const demandValue = demandTone === 'red' && metrics.volume === 0
-    ? 'No demand'
-    : demandTone === 'red'
-      ? 'Very low demand'
-      : demandTone === 'amber'
-        ? 'Low demand'
-        : demandTone === 'ok'
-          ? 'Demand is there'
-          : 'Not enough to tell';
-  const floatTone = metrics.floatRatio != null
-    ? (metrics.floatRatio <= 0.2 ? 'red' : metrics.floatRatio <= 0.5 ? 'amber' : 'ok')
-    : metrics.insiderPct != null
-      ? (metrics.insiderPct >= CLOSELY_HELD_RED ? 'red' : metrics.insiderPct >= CLOSELY_HELD_AMBER ? 'amber' : 'ok')
-      : 'unknown';
-  const spreadTone = metrics.spread == null
-    ? 'unknown'
-    : metrics.spread >= SPREAD_RED
-      ? 'red'
-      : metrics.spread >= SPREAD_AMBER
-        ? 'amber'
-        : 'ok';
-  const listing = String(listingStatus || '').toLowerCase();
-  const listingTone = listing === 'delisted' || listing === 'suspended' || listing === 'halted' ? 'red' : 'unknown';
-  const hoursTone = venue === 'crypto' ? 'ok' : marketOpen === false ? 'amber' : marketOpen === true ? 'ok' : 'unknown';
-  const settlement = venue === 'ngx'
-    ? { value: 'Two trading days', hint: 'Cash from a sale is due two trading days later. The wait is the same for every NGX name, so it is not why one name is harder than another.' }
-    : venue === 'us'
-      ? { value: 'Next trading day', hint: 'Cash from a sale is due the next trading day. The wait is the same for every US name, so it is not why one name is harder than another.' }
-      : { value: 'At once', hint: 'A trade on the exchange settles immediately.' };
-
-  const factors = [
-    {
+  if (metrics.floatRatio != null) {
+    const pct = Math.round(metrics.floatRatio * 100);
+    factors.push({
       key: 'float',
       label: 'Free float',
-      value: venue === 'crypto'
-        ? 'Does not apply'
-        : metrics.floatRatio != null
-          ? `${Math.round(metrics.floatRatio * 100)}% of the shares`
-          : metrics.insiderPct != null
-            ? `Insiders hold ${Math.round(metrics.insiderPct * 100)}%`
-            : 'Not published',
-      hint: venue === 'crypto'
-        ? 'A coin has no share float.'
-        : metrics.floatRatio != null || metrics.insiderPct != null
-          ? 'A low free float means fewer shares are actually for sale.'
-          : 'This feed does not say how many shares are free to trade.',
-      tone: venue === 'crypto' ? 'ok' : floatTone,
-    },
-    {
-      key: 'demand',
-      label: 'Demand',
-      value: demandValue,
-      hint: metrics.averageValue > 0
-        ? `A usual day trades about ${formatMoney(metrics.averageValue, venue)}.`
-        : metrics.valueTraded > 0
-          ? `${formatMoney(metrics.valueTraded, venue)} traded in the latest session.`
-          : 'Nothing traded in the latest session.',
-      tone: demandTone,
-    },
-    {
+      value: `${pct}% of the shares`,
+      hint: pct <= 20
+        ? 'Very little is free to trade'
+        : pct <= 50
+          ? 'A large part is not free to trade'
+          : 'Most of the shares can trade',
+      tone: pct <= 20 ? 'red' : pct <= 50 ? 'amber' : 'ok',
+    });
+  } else if (metrics.insiderPct != null) {
+    const pct = Math.round(metrics.insiderPct * 100);
+    factors.push({
+      key: 'float',
+      label: 'Free float',
+      value: `Insiders hold ${pct}%`,
+      hint: 'From the quote. A high insider holding means fewer shares are free to trade.',
+      tone: metrics.insiderPct >= CLOSELY_HELD_RED ? 'red' : metrics.insiderPct >= CLOSELY_HELD_AMBER ? 'amber' : 'ok',
+    });
+  } else {
+    factors.push({
+      key: 'float',
+      label: 'Free float',
+      value: 'Not published',
+      hint: venue === 'ngx'
+        ? 'NGX Pulse does not say how many shares are free to trade. A low free float makes a sale harder.'
+        : 'This quote did not include free float.',
+      tone: 'unknown',
+    });
+  }
+
+  if (metrics.averageValue > 0) {
+    const slice = saleSlicePhrase(typicalShare);
+    const where = metrics.averageSessions
+      ? `Average of the ${metrics.averageSessions} sessions loaded`
+      : 'Usual daily volume, times the price';
+    factors.push({
+      key: 'average',
+      label: 'Typical volume and value',
+      value: formatMoney(metrics.averageValue, venue),
+      hint: slice ? `${where}. A normal sale would be ${slice}.` : where,
+      tone: typicalShare >= SALE_SHARE_RED ? 'red' : typicalShare >= SALE_SHARE_AMBER ? 'amber' : 'ok',
+    });
+  } else {
+    factors.push({
+      key: 'average',
+      label: 'Typical volume and value',
+      value: metrics.valueTraded > 0 ? `${formatMoney(metrics.valueTraded, venue)} today` : 'Nothing today',
+      hint: 'Only this session is in the feed. A low usual volume and value is what makes a sale slow, and that average is not published here.',
+      tone: 'unknown',
+    });
+  }
+
+  if (metrics.spread != null) {
+    factors.push({
       key: 'spread',
       label: 'Bid–ask spread',
-      value: metrics.spread == null ? 'Not published' : percentLabel(metrics.spread),
-      hint: metrics.spread == null
-        ? 'This feed does not publish the bid and the ask. A wide gap makes the next sale worse than the last price.'
-        : spreadTone === 'ok'
-          ? 'The bid and the ask are close.'
-          : 'The gap is wide enough that a sale can print below the last price.',
-      tone: spreadTone,
-    },
-    {
-      key: 'listing',
-      label: 'Delisting or suspension',
-      value: venue === 'crypto'
-        ? 'Does not apply'
-        : listing === 'delisted'
-          ? 'Delisted'
-          : listing === 'suspended' || listing === 'halted'
-            ? 'Suspended'
-            : 'Not published',
-      hint: listingTone === 'red'
-        ? 'The exchange is not taking a normal sale in this name.'
-        : 'This feed does not say whether the name is suspended or being delisted.',
-      tone: venue === 'crypto' ? 'ok' : listingTone,
-    },
-    {
-      key: 'action',
-      label: 'Corporate action',
-      value: corporateAction ? 'In progress' : 'Not published',
-      hint: corporateAction
-        ? (corporateActionNote || 'A corporate action is on the record for this name. Ask a broker whether the sale still goes through.')
-        : 'This feed does not say whether a split, a bonus, or a rights issue is under way.',
-      tone: corporateAction ? 'amber' : 'unknown',
-    },
-    {
-      key: 'settlement',
-      label: 'Settlement',
-      value: settlement.value,
-      hint: settlement.hint,
-      tone: 'ok',
-    },
-    {
-      key: 'hours',
-      label: 'Market hours',
-      value: venue === 'crypto' ? 'Trades all day' : marketOpen === false ? 'Closed' : marketOpen === true ? 'Open' : 'Not published',
-      hint: venue === 'crypto'
-        ? 'Crypto does not stop for a session clock.'
-        : marketOpen === false
-          ? 'The session is closed, so a sale waits until the next open. That does not change how easy the last session was.'
-          : marketOpen === true
-            ? 'The session is open.'
-            : 'This screen does not know whether the session is open.',
-      tone: hoursTone,
-    },
-  ];
+      value: percentLabel(metrics.spread),
+      hint: metrics.spread >= SPREAD_RED
+        ? 'Wide. The next sale can be well below the last price.'
+        : metrics.spread >= SPREAD_AMBER
+          ? 'Wide enough that a sale may move the price.'
+          : 'The bid and the ask are close.',
+      tone: metrics.spread >= SPREAD_RED ? 'red' : metrics.spread >= SPREAD_AMBER ? 'amber' : 'ok',
+    });
+  } else {
+    factors.push({
+      key: 'spread',
+      label: 'Bid–ask spread',
+      value: 'Not published',
+      hint: venue === 'ngx'
+        ? 'NGX Pulse does not publish the bid and the ask. A wide gap makes a sale harder.'
+        : 'This quote did not include a bid and an ask.',
+      tone: 'unknown',
+    });
+  }
 
-  const causeKey = {
-    'No demand': 'demand',
-    'Very low demand': 'demand',
-    'Low demand': 'demand',
-    'Demand is there': 'demand',
-    'Low free float': 'float',
-    'Wide spread': 'spread',
-    'Suspended': 'listing',
-    'Delisted': 'listing',
-    'Corporate action': 'action',
-    'Market closed': 'hours',
-  }[reason] || null;
+  if (venue === 'ngx') {
+    factors.push({
+      key: 'maker',
+      label: 'Market maker',
+      value: 'Not published',
+      hint: 'A name with no market maker is often harder to sell. This feed does not say whether one is appointed.',
+      tone: 'unknown',
+    });
+  }
 
-  return factors.map((factor) => ({
-    ...factor,
-    cause: factor.key === causeKey,
-  }));
+  return factors;
 }
 
 /**
@@ -434,24 +341,6 @@ export function assessLiquidity(row = {}, context = {}) {
   const unitWord = venue === 'crypto' ? 'coin' : 'stock';
   const dayWord = venue === 'crypto' ? '24 hours' : 'latest session';
   const boardIsQuiet = quietFraction(context.peerVolumes) >= 0.6;
-  const marketOpen = venue === 'crypto' ? true : context.marketOpen;
-  const listingStatus = String(row.listingStatus || '').toLowerCase();
-
-  if (listingStatus === 'delisted') {
-    pushFlag(
-      flags,
-      'red',
-      'DELISTED',
-      'This name is delisted. The exchange is not taking a normal sale.',
-    );
-  } else if (listingStatus === 'suspended' || listingStatus === 'halted') {
-    pushFlag(
-      flags,
-      'red',
-      'SUSPENDED',
-      'Trading is suspended. A sale has to wait until the exchange lets it through.',
-    );
-  }
 
   if (!metrics.usedTypical && metrics.volume === 0) {
     if (boardIsQuiet) {
@@ -459,9 +348,7 @@ export function assessLiquidity(row = {}, context = {}) {
         flags,
         'unknown',
         'QUIET_BOARD',
-        marketOpen === false
-          ? 'The market is closed. Almost nothing on this list traded because the session is not open. That is not a verdict on this one name.'
-          : 'Almost nothing on this list traded. The session may be closed, or the numbers have not updated yet. That is not a verdict on this one name.',
+        'Almost nothing on this list traded. The market may be closed, or the numbers have not updated yet. That is not a verdict on this one name.',
       );
     } else {
       pushFlag(
@@ -643,15 +530,11 @@ export function assessLiquidity(row = {}, context = {}) {
   else if (flags.some((flag) => flag.code === 'QUIET_BOARD')) tone = 'unknown';
   else if (flow != null || metrics.volume != null || metrics.valueTraded != null) tone = 'ok';
 
-  const leadFlag = flags.find((flag) => flag.code === 'DELISTED' || flag.code === 'SUSPENDED')
-    || flags.find((flag) => flag.code === 'INSIDER_CONTROL' || flag.code === 'TIGHT_FLOAT')
+  const leadFlag = flags.find((flag) => flag.code === 'INSIDER_CONTROL' || flag.code === 'TIGHT_FLOAT')
     || flags.find((flag) => flag.code === 'NO_PRINTS' || flag.code === 'QUIET_BOARD')
     || flags.find((flag) => flag.severity === 'red')
     || flags.find((flag) => flag.severity === 'amber')
     || null;
-  const reason = reasonFromFlag(leadFlag, marketOpen)
-    || (tone === 'ok' ? 'Demand is there' : 'Not enough to tell');
-  const marketClosed = venue !== 'crypto' && marketOpen === false;
   const lead = leadFlag?.text
     || (tone === 'ok'
       ? `Plenty of this ${unitWord} changed hands next to a normal ${saleLabel} sale, so getting out is usually straightforward.`
@@ -718,23 +601,10 @@ export function assessLiquidity(row = {}, context = {}) {
     metrics,
     peerMedianTurnover: medianTurnover,
     label: TONE_LABEL[tone],
-    reason,
-    marketClosed,
     lead,
     notes,
     cards,
-    factors: sellFactors({
-      venue,
-      metrics,
-      typicalShare,
-      saleShare,
-      reason,
-      marketOpen,
-      listingStatus,
-      corporateAction: Boolean(row.corporateAction),
-      corporateActionNote: row.corporateActionNote || '',
-      tone,
-    }),
+    factors: sellFactors({ venue, metrics, typicalShare }),
     tableLine,
     saleSize: sale,
     saleShare,
@@ -742,7 +612,7 @@ export function assessLiquidity(row = {}, context = {}) {
   };
 }
 
-export function scoreLiquidityBoard(rows, venue = 'ngx', context = {}) {
+export function scoreLiquidityBoard(rows, venue = 'ngx') {
   const normalized = (rows || []).map((row) => ({
     ...row,
     venue: row.venue || venue,
@@ -752,7 +622,7 @@ export function scoreLiquidityBoard(rows, venue = 'ngx', context = {}) {
   const peerCaps = normalized.map((row) => row.marketCap);
   const peerVolumes = normalized.map((row) => row.volume);
   return normalized.map((row) => {
-    const reading = assessLiquidity(row, { venue, peerTurnovers, peerCaps, peerVolumes, ...context });
+    const reading = assessLiquidity(row, { venue, peerTurnovers, peerCaps, peerVolumes });
     return {
       id: row.id || null,
       symbol: row.symbol || row.id,
@@ -760,8 +630,6 @@ export function scoreLiquidityBoard(rows, venue = 'ngx', context = {}) {
       sector: row.sector || row.category || null,
       tone: reading.tone,
       label: reading.label,
-      reason: reading.reason,
-      marketClosed: reading.marketClosed,
       flags: reading.flags,
       tableLine: reading.tableLine,
       tradedLabel: reading.cards.find((item) => item.key === 'traded')?.value || '—',

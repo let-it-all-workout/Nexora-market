@@ -17,6 +17,7 @@ import {
   YAxis,
 } from 'recharts';
 import { HelpHint } from './HelpHint';
+import { formatDateTick } from '../lib/chartFormat';
 
 /** One unique color per overlay so SMA/EMA/MACD are never the same line. */
 const INDICATOR = {
@@ -78,20 +79,6 @@ function formatWhen(row) {
   const dateLabel = instant.toLocaleDateString(undefined, DATE_LABEL);
   const timeLabel = instant.toLocaleTimeString(undefined, TIME_LABEL);
   return { dateLabel, timeLabel, summary: `${dateLabel} · ${timeLabel}`, hasTime: true };
-}
-
-function formatDateTick(value) {
-  const text = String(value || '');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    const [year, month, day] = text.split('-').map(Number);
-    const local = new Date(year, month - 1, day);
-    if (!Number.isNaN(local.getTime())) {
-      return local.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-    }
-  }
-  const instant = new Date(text);
-  if (Number.isNaN(instant.getTime())) return text;
-  return instant.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 function formatPctChange(value) {

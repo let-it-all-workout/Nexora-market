@@ -22,6 +22,7 @@ import {
   firstLastPct,
   rebaseAverageSeries,
 } from '../lib/marketMath';
+import { formatDateTick } from '../lib/chartFormat';
 
 function scalePriceFields(series, rate) {
   const keys = ['open', 'high', 'low', 'close', 'ma7', 'sma20', 'ema20', 'bb_upper', 'bb_middle', 'bb_lower', 'macd', 'macd_signal', 'macd_hist'];
@@ -1316,7 +1317,7 @@ export function StockPage() {
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={overview.conditionSeries}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" minTickGap={24} />
+                  <XAxis dataKey="date" minTickGap={24} tickFormatter={formatDateTick} />
                   <YAxis />
                   <Tooltip />
                   <Line type="monotone" dataKey="marketIndex" stroke="#2563eb" dot={false} strokeWidth={2} name="Sample index (start = 100)" />
@@ -1731,7 +1732,7 @@ export function StockPage() {
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={comparisonChartData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" minTickGap={24} />
+                  <XAxis dataKey="date" minTickGap={24} tickFormatter={formatDateTick} />
                   <YAxis tickFormatter={(value) => `${value}%`} />
                   <Tooltip formatter={(value) => `${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(2)}%`} />
                   <Legend />
