@@ -1,0 +1,21 @@
+flowchart LR
+  V([Visitor])
+  R([Registered user])
+  SB([Supabase Auth])
+  subgraph Nexora Markets
+    UC1(View market overview)
+    UC2(Search a stock, NGX listing, or coin)
+    UC3(View chart and indicators)
+    UC4(See unusual-day flags)
+    UC5(Check liquidity warning)
+    UC6(View possible price range)
+    UC7(Read news)
+    UC8(Take lessons and tour)
+    UC9(Sign up / log in)
+    UC10(Add or remove stock in watchlist)
+    UC11(Log out)
+  end
+  V --- UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC7 & UC8 & UC9
+  R --- UC10 & UC11
+  R -. inherits .-> V
+  UC9 --- SB

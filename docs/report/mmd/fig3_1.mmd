@@ -1,0 +1,14 @@
+flowchart TD
+  U((Beginner investor))
+  S1[Social media and friends]
+  S2[Exchange or broker app]
+  S3[Foreign charting site]
+  S4[Exchange-rate site]
+  S5[News search]
+  U -- hears a tip --> S1
+  U -- checks price --> S2
+  U -- looks for chart --> S3
+  U -- checks USD/NGN --> S4
+  U -- searches news --> S5
+  S1 & S2 & S3 & S4 & S5 -- separate pieces --> M[User combines<br/>everything mentally]
+  M --> D[Decision with<br/>little explanation]

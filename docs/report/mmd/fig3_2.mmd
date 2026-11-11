@@ -1,0 +1,12 @@
+flowchart TD
+  U((User)) -- search, pick, horizon --> FE[Web interface<br/>React]
+  FE -- API request --> BE[Application server<br/>Node.js / Express]
+  BE -- fetch --> P1[(NGX Pulse)]
+  BE -- fetch --> P2[(Yahoo Finance)]
+  BE -- fetch --> P3[(CoinGecko)]
+  BE -- fetch --> P4[(Exchange-rate APIs)]
+  BE -- fetch --> P5[(News feeds)]
+  BE -- clean, indicators,<br/>flags, ranges --> FE
+  FE -- sign in, save list --> SB[(Supabase Auth<br/>and PostgreSQL)]
+  SB -- own rows only --> FE
+  FE -- charts, labels,<br/>lessons --> U

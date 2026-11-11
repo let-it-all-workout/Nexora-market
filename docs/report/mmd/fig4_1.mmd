@@ -1,0 +1,8 @@
+flowchart TB
+  P["<b>Presentation tier</b> (browser, React)<br/>Home · Stocks · Crypto · NGX · Forecast · Learn<br/>Account form and watchlist"]
+  A["<b>Application tier</b> (Node.js / Express)<br/>Routes: /api/stocks, /api/crypto, /api/ngx, /api/fx, /api/health<br/>Services: market data, news, NGX listing facts<br/>Utilities: normalise, indicators, anomaly, liquidity, forecast<br/>Security: Helmet CSP, rate limits, CORS"]
+  DT[("<b>Data tier: market sources</b><br/>NGX Pulse · Yahoo Finance · CoinGecko<br/>Exchange-rate APIs · Google News RSS")]
+  DB[("<b>Data tier: Supabase</b><br/>auth.users<br/>public.watchlists")]
+  P -- HTTPS JSON --> A
+  A -- fetch --> DT
+  P -- HTTPS, user token --> DB

@@ -1,0 +1,13 @@
+erDiagram
+  AUTH_USERS ||--o| WATCHLISTS : owns
+  AUTH_USERS {
+    uuid id PK
+    text email
+    timestamptz email_confirmed_at
+    timestamptz created_at
+  }
+  WATCHLISTS {
+    uuid user_id PK, FK
+    text_array symbols
+    timestamptz updated_at
+  }
